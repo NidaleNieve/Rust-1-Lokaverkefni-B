@@ -23,17 +23,27 @@ struct UiState {
     new_lumens: u32,
 
     // update location
-    // filters by specific room/floor
-    filter_house: House,
-    filter_floor: u8,
-    filter_room: u16,
+    // (removed old room/floor filters previously used for separate sections)
 
-    // update location
+    // update location (use same widgets as new item)
     update_id: String,
-    update_location: String,
+    update_house: House,
+    update_floor: u8,
+    update_room: u16,
 
     // print by id
     print_id: String,
+
+    // unified printing section
+    print_scope: PrintScope,
+    print_house: House,
+    print_floor: u8,
+    print_room: u16,
+    print_kind: EquipmentKind,
+
+    // pretty output area (bottom panel)
+    print_output: Option<String>,
+    print_details: Option<String>,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -50,9 +60,11 @@ impl BunadarApp {
             state: UiState {
                 new_value_isk: 0,
                 new_chair_kind: ChairKind::Annad,
-                filter_house: House::H,
-                filter_floor: 1,
-                filter_room: 1,
+                print_scope: PrintScope::All,
+                print_house: House::H,
+                print_floor: 1,
+                print_room: 1,
+                print_kind: EquipmentKind::Table,
                 ..Default::default()
             },
             items,
@@ -70,6 +82,15 @@ impl BunadarApp {
         };
         self.items = res.unwrap_or_default();
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PrintScope {
+    All,
+    ByHouse,
+    ByKind,
+    ByRoom,
+    ByFloorInHouse,
 }
 
 impl eframe::App for BunadarApp {
@@ -218,71 +239,138 @@ impl eframe::App for BunadarApp {
             ui.separator();
             ui.heading("Uppfæra staðsetningu");
             ui.add(egui::TextEdit::singleline(&mut self.state.update_id).hint_text("id"));
-            ui.add(egui::TextEdit::singleline(&mut self.state.update_location).hint_text("t.d. H-202"));
+            egui::ComboBox::from_label("Hús")
+                .selected_text(self.state.update_house.to_string())
+                .show_ui(ui, |ui| {
+                    for h in [House::HA, House::H, House::S] {
+                        ui.selectable_value(&mut self.state.update_house, h, h.to_string());
+                    }
+                });
+            ui.add(egui::Slider::new(&mut self.state.update_floor, 0..=9).text("Hæð"));
+            ui.add(egui::Slider::new(&mut self.state.update_room, 1..=999).text("Herbergi"));
             if ui.button("Uppfæra").clicked() {
                 let id = self.state.update_id.parse::<i64>().unwrap_or(-1);
-                match self.state.update_location.parse::<Location>() {
-                    Ok(loc) => match self.inv.update_location(id, &loc) {
-                        Ok(true) => { self.status = Some("Staðsetning uppfærð".into()); self.reload_items(); }
-                        Ok(false) => self.status = Some("Ekkert fannst með þetta id".into()),
-                        Err(e) => self.status = Some(format!("Villa: {}", e)),
-                    },
-                    Err(e) => self.status = Some(format!("Ógild staðsetning: {}", e)),
-                }
+                let loc = Location { house: self.state.update_house, floor: self.state.update_floor, room: self.state.update_room };
+                match self.inv.update_location(id, &loc) {
+                    Ok(true) => { self.status = Some("Staðsetning uppfærð".into()); self.reload_items(); }
+                    Ok(false) => self.status = Some("Ekkert fannst með þetta id".into()),
+                    Err(e) => self.status = Some(format!("Villa: {}", e)),
+                };
             }
 
-            
             ui.separator();
-            ui.heading("Birta búnað í ákveðinni stofu");
-            egui::ComboBox::from_label("Hús (stofa)")
-                .selected_text(self.state.filter_house.to_string())
-                .show_ui(ui, |ui| {
-                    for h in [House::HA, House::H, House::S] {
-                        ui.selectable_value(&mut self.state.filter_house, h, h.to_string());
+            ui.heading("Prenta");
+            // Togglable options
+            egui::CollapsingHeader::new("Valkostur").default_open(true).show(ui, |ui| {
+                ui.radio_value(&mut self.state.print_scope, PrintScope::All, "Allur búnaður");
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.state.print_scope, PrintScope::ByHouse, "Eftir húsi");
+                    if self.state.print_scope == PrintScope::ByHouse {
+                        egui::ComboBox::from_label("Hús")
+                            .selected_text(self.state.print_house.to_string())
+                            .show_ui(ui, |ui| {
+                                for h in [House::HA, House::H, House::S] {
+                                    ui.selectable_value(&mut self.state.print_house, h, h.to_string());
+                                }
+                            });
                     }
                 });
-            ui.add(egui::Slider::new(&mut self.state.filter_floor, 0..=9).text("Hæð (stofa)"));
-            ui.add(egui::Slider::new(&mut self.state.filter_room, 1..=999).text("Herbergi (stofa)"));
-            if ui.button("Birta stofu").clicked() {
-                let loc = Location { house: self.state.filter_house, floor: self.state.filter_floor, room: self.state.filter_room };
-                match self.inv.by_room(&loc) {
-                    Ok(v) => { self.items = v; self.status = Some(format!("{} hlutir í {}", self.items.len(), loc)); }
-                    Err(e) => self.status = Some(format!("Villa: {}", e)),
-                }
-            }
-
-            ui.separator();
-            ui.heading("Birta búnað á ákveðinni hæð í húsi");
-            let mut house2 = self.state.filter_house;
-            egui::ComboBox::from_label("Hús (hæð)")
-                .selected_text(house2.to_string())
-                .show_ui(ui, |ui| {
-                    for h in [House::HA, House::H, House::S] {
-                        ui.selectable_value(&mut house2, h, h.to_string());
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.state.print_scope, PrintScope::ByKind, "Eftir tegund");
+                    if self.state.print_scope == PrintScope::ByKind {
+                        egui::ComboBox::from_label("Tegund")
+                            .selected_text(self.state.print_kind.to_string())
+                            .show_ui(ui, |ui| {
+                                for k in [EquipmentKind::Table, EquipmentKind::Chair, EquipmentKind::Projector] {
+                                    ui.selectable_value(&mut self.state.print_kind, k, k.to_string());
+                                }
+                            });
                     }
                 });
-            let mut floor2 = self.state.filter_floor;
-            ui.add(egui::Slider::new(&mut floor2, 0..=9).text("Hæð (hús)"));
-            if ui.button("Birta hæð").clicked() {
-                match self.inv.by_floor(house2, floor2) {
-                    Ok(v) => { self.items = v; self.status = Some(format!("{} hlutir á {}-hæð í {}", self.items.len(), floor2, house2)); }
-                    Err(e) => self.status = Some(format!("Villa: {}", e)),
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.state.print_scope, PrintScope::ByRoom, "Í ákveðinni stofu");
+                    if self.state.print_scope == PrintScope::ByRoom {
+                        egui::ComboBox::from_label("Hús")
+                            .selected_text(self.state.print_house.to_string())
+                            .show_ui(ui, |ui| {
+                                for h in [House::HA, House::H, House::S] {
+                                    ui.selectable_value(&mut self.state.print_house, h, h.to_string());
+                                }
+                            });
+                        ui.add(egui::Slider::new(&mut self.state.print_floor, 0..=9).text("Hæð"));
+                        ui.add(egui::Slider::new(&mut self.state.print_room, 1..=999).text("Herbergi"));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut self.state.print_scope, PrintScope::ByFloorInHouse, "Á ákveðinni hæð í húsi");
+                    if self.state.print_scope == PrintScope::ByFloorInHouse {
+                        egui::ComboBox::from_label("Hús")
+                            .selected_text(self.state.print_house.to_string())
+                            .show_ui(ui, |ui| {
+                                for h in [House::HA, House::H, House::S] {
+                                    ui.selectable_value(&mut self.state.print_house, h, h.to_string());
+                                }
+                            });
+                        ui.add(egui::Slider::new(&mut self.state.print_floor, 0..=9).text("Hæð"));
+                    }
+                });
+            });
+            if ui.button("Prenta").clicked() {
+                // Resolve selection and update list and a human-readable summary
+                let res = match self.state.print_scope {
+                    PrintScope::All => self.inv.all().map(|v| (v, "Allur búnaður".to_string())),
+                    PrintScope::ByHouse => self.inv.by_house(self.state.print_house).map(|v| (v, format!("Búnaður í húsi {}", self.state.print_house))),
+                    PrintScope::ByKind => self.inv.by_kind(self.state.print_kind).map(|v| (v, format!("Búnaður af tegund {}", self.state.print_kind))),
+                    PrintScope::ByRoom => {
+                        let loc = Location { house: self.state.print_house, floor: self.state.print_floor, room: self.state.print_room };
+                        self.inv.by_room(&loc).map(|v| (v, format!("Búnaður í stofu {}", loc)))
+                    }
+                    PrintScope::ByFloorInHouse => {
+                        let h = self.state.print_house; let f = self.state.print_floor;
+                        self.inv.by_floor(h, f).map(|v| (v, format!("Búnaður á {}-hæð í {}", f, h)))
+                    }
+                };
+                match res {
+                    Ok((v, label)) => {
+                        self.items = v;
+                        self.state.print_output = Some(format!("{}: {} atriði.", label, self.items.len()));
+                        // Pretty printed lines
+                        let mut buf = String::new();
+                        for rec in &self.items {
+                            use std::fmt::Write as _;
+                            let _ = writeln!(&mut buf, "{}", rec);
+                        }
+                        self.state.print_details = if buf.is_empty() { None } else { Some(buf) };
+                    }
+                    Err(e) => {
+                        self.state.print_output = Some(format!("Villa við prentun: {}", e));
+                        self.state.print_details = None;
+                    }
                 }
             }
 
             ui.separator();
-            ui.heading("Prenta/eyða");
+            ui.heading("Prenta eftir ID");
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.state.print_id).hint_text("id"));
                 if ui.button("Prenta").clicked() {
                     if let Ok(id) = self.state.print_id.parse::<i64>() {
                         match self.inv.by_id(id) {
-                            Ok(Some(rec)) => self.status = Some(format!("{}", rec)),
-                            Ok(None) => self.status = Some("Ekkert fannst".into()),
-                            Err(e) => self.status = Some(format!("Villa: {}", e)),
+                            Ok(Some(rec)) => {
+                                self.state.print_output = Some("1 atriði".into());
+                                self.state.print_details = Some(format!("{}", rec));
+                            }
+                            Ok(None) => { self.state.print_output = Some("Ekkert fannst".into()); self.state.print_details = None; }
+                            Err(e) => { self.state.print_output = Some(format!("Villa: {}", e)); self.state.print_details = None; }
                         }
                     }
                 }
+            });
+
+            ui.separator();
+            ui.heading("Eyða eftir ID");
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.state.print_id).hint_text("id"));
                 if ui.button("Eyða").clicked() {
                     if let Ok(id) = self.state.print_id.parse::<i64>() {
                         match self.inv.remove(id) {
@@ -303,7 +391,7 @@ impl eframe::App for BunadarApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui_extras::TableBuilder::new(ui)
                     .striped(true)
-                    .column(egui_extras::Column::auto())
+                    .column(egui_extras::Column::initial(48.0))
                     .column(egui_extras::Column::auto())
                     .column(egui_extras::Column::auto())
                     .column(egui_extras::Column::auto())
@@ -318,7 +406,10 @@ impl eframe::App for BunadarApp {
                     .body(|mut body| {
                         for item in &self.items {
                             body.row(text_height, |mut row| {
-                                row.col(|ui| { ui.label(item.id.unwrap_or_default().to_string()); });
+                                row.col(|ui| {
+                                    let txt = egui::RichText::new(item.id.unwrap_or_default().to_string()).monospace();
+                                    ui.add(egui::Label::new(txt).wrap(false));
+                                });
                                 row.col(|ui| { ui.label(item.kind.to_string()); });
                                 row.col(|ui| { ui.label(item.location.to_string()); });
                                 row.col(|ui| { ui.label(format!("{} kr.", item.value_isk.separate_with_spaces())); });
@@ -334,6 +425,23 @@ impl eframe::App for BunadarApp {
                     });
             });
         });
+
+        // Pretty output area at the bottom (not grey/top)
+        egui::TopBottomPanel::bottom("print_output_panel").show(ctx, |ui| {
+            if let Some(txt) = &self.state.print_output {
+                ui.group(|ui| {
+                    ui.heading("Úttak");
+                    ui.separator();
+                    ui.label(egui::RichText::new(txt).strong());
+                    if let Some(details) = &self.state.print_details {
+                        ui.separator();
+                        egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                            ui.monospace(details);
+                        });
+                    }
+                });
+            }
+        });
     }
 }
 
@@ -348,12 +456,18 @@ impl Default for UiState {
             new_seats: 4,
             new_chair_kind: ChairKind::Annad,
             new_lumens: 1000,
-            filter_house: House::H,
-            filter_floor: 1,
-            filter_room: 1,
             update_id: String::new(),
-            update_location: String::new(),
+            update_house: House::H,
+            update_floor: 1,
+            update_room: 1,
             print_id: String::new(),
+            print_scope: PrintScope::All,
+            print_house: House::H,
+            print_floor: 1,
+            print_room: 1,
+            print_kind: EquipmentKind::Table,
+            print_output: None,
+            print_details: None,
         }
     }
 }

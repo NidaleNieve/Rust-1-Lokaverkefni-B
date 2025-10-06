@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::fmt;
 use super::Location;
+use thousands::Separable;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Projector {
@@ -14,9 +15,11 @@ impl fmt::Display for Projector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Skjávarpi(id={}, {} lm, {} kr., {})",
-            self.id.map(|x| x.to_string()).unwrap_or_else(||"-".into()),
-            self.lumens, self.value_isk, self.location
+            "Skjávarpi með ID: {}, kostar {}kr, með {} lumen og er staðsettur í {}",
+            self.id.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
+            self.value_isk.separate_with_spaces(),
+            self.lumens,
+            self.location
         )
     }
 }
