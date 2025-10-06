@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": null,
+      "kind": "Table",
+      "value_isk": 45000,
+      "location": {
+        "house": "H",
+        "floor": 2,
+        "room": 2
+      },
+      "seats": 4,
+      "chair_kind": null,
+      "lumens": null
+    },
+    {
+      "id": null,
+      "kind": "Chair",
+      "value_isk": 12000,
+      "location": {
+        "house": "HA",
+        "floor": 1,
+        "room": 23
+      },
+      "seats": null,
+      "chair_kind": "Skolastoll",
+      "lumens": null
+    },
+    {
+      "id": null,
+      "kind": "Projector",
+      "value_isk": 150000,
+      "location": {
+        "house": "S",
+        "floor": 3,
+        "room": 12
+      },
+      "seats": null,
+      "chair_kind": null,
+      "lumens": 3500
+    }
+  ]
+}
