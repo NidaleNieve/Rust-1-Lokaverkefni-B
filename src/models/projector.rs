@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use std::fmt;
 use super::Location;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Projector {
@@ -15,8 +15,10 @@ impl fmt::Display for Projector {
         write!(
             f,
             "Skjávarpi(id={}, {} lm, {} kr., {})",
-            self.id.map(|x| x.to_string()).unwrap_or_else(||"-".into()),
-            self.lumens, self.value_isk, self.location
+            self.id.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
+            self.lumens,
+            self.value_isk,
+            self.location
         )
     }
 }

@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use super::Location;
@@ -16,7 +16,7 @@ impl fmt::Display for TableItem {
         write!(
             f,
             "Borð(id={}, sæti={}, verðmæti={} kr., staðsetning={})",
-            self.id.map(|x| x.to_string()).unwrap_or_else(||"-".into()),
+            self.id.map(|x| x.to_string()).unwrap_or_else(|| "-".into()),
             self.seats,
             self.value_isk,
             self.location

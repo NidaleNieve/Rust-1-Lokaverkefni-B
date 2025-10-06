@@ -4,8 +4,8 @@ mod inventory;
 mod models;
 
 use dotenvy::dotenv;
-use std::env;
 use eframe::NativeOptions;
+use std::env;
 
 fn main() -> eframe::Result<()> {
     dotenv().ok();

@@ -1,13 +1,25 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum House { HA, H, S }
+pub enum House {
+    HA,
+    H,
+    S,
+}
 
 impl fmt::Display for House {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", match self { House::HA => "HA", House::H => "H", House::S => "S" })
+        write!(
+            f,
+            "{}",
+            match self {
+                House::HA => "HA",
+                House::H => "H",
+                House::S => "S",
+            }
+        )
     }
 }
 

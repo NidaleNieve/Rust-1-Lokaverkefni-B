@@ -1,7 +1,8 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fmt;
+use thousands::Separable;
 
-use super::{TableItem, Chair, Projector, Location, ChairKind};
+use super::{Chair, ChairKind, Location, Projector, TableItem};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EquipmentKind {
@@ -16,6 +17,14 @@ impl EquipmentKind {
             EquipmentKind::Table => "Table",
             EquipmentKind::Chair => "Chair",
             EquipmentKind::Projector => "Projector",
+        }
+    }
+
+    pub fn friendly_name(&self) -> &'static str {
+        match self {
+            EquipmentKind::Table => "Borð",
+            EquipmentKind::Chair => "Stóll",
+            EquipmentKind::Projector => "Skjávarpi",
         }
     }
 }
@@ -51,34 +60,56 @@ pub struct EquipmentRecord {
 
 impl fmt::Display for EquipmentRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.pretty_description())
+    }
+}
+
+impl EquipmentRecord {
+    pub fn pretty_description(&self) -> String {
+        let id_text = self
+            .id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "óskráð".into());
+        let value_text = self.value_isk.max(0).separate_with_spaces();
+        let location = self.location.to_string();
+
         match self.kind {
-            EquipmentKind::Table => write!(
-                f, "{}",
-                TableItem {
-                    id: self.id,
-                    value_isk: self.value_isk,
-                    location: self.location.clone(),
-                    seats: self.seats.unwrap_or(0),
-                }
-            ),
-            EquipmentKind::Chair => write!(
-                f, "{}",
-                Chair {
-                    id: self.id,
-                    value_isk: self.value_isk,
-                    location: self.location.clone(),
-                    kind: self.chair_kind.unwrap_or(ChairKind::Annad),
-                }
-            ),
-            EquipmentKind::Projector => write!(
-                f, "{}",
-                Projector {
-                    id: self.id,
-                    value_isk: self.value_isk,
-                    location: self.location.clone(),
-                    lumens: self.lumens.unwrap_or(0),
-                }
-            ),
+            EquipmentKind::Table => {
+                let seats = self.seats.unwrap_or(0);
+                let seat_phrase = if seats == 0 {
+                    "með óskráðum sætum".to_string()
+                } else {
+                    format!(
+                        "með {} {}",
+                        seats,
+                        if seats == 1 { "sæti" } else { "sætum" }
+                    )
+                };
+                format!(
+                    "Borð með ID: {}, kostar {} kr., {} og er staðsett í {}.",
+                    id_text, value_text, seat_phrase, location
+                )
+            }
+            EquipmentKind::Chair => {
+                let kind = self
+                    .chair_kind
+                    .map(|k| k.to_string())
+                    .unwrap_or_else(|| "óþekktri gerð".into());
+                format!(
+                    "Stóll með ID: {}, kostar {} kr., af gerð {} og er staðsettur í {}.",
+                    id_text, value_text, kind, location
+                )
+            }
+            EquipmentKind::Projector => {
+                let lumens_text = self
+                    .lumens
+                    .map(|l| format!("með {} lumen", l.separate_with_spaces()))
+                    .unwrap_or_else(|| "með óskráða lumen".into());
+                format!(
+                    "Skjávarpi með ID: {}, kostar {} kr., {} og er staðsettur í {}.",
+                    id_text, value_text, lumens_text, location
+                )
+            }
         }
     }
 }
@@ -102,7 +133,9 @@ impl From<TableItem> for EquipmentRecord {
 impl TryFrom<EquipmentRecord> for TableItem {
     type Error = String;
     fn try_from(e: EquipmentRecord) -> Result<Self, Self::Error> {
-        if e.kind != EquipmentKind::Table { return Err("Ekki Table".into()); }
+        if e.kind != EquipmentKind::Table {
+            return Err("Ekki Table".into());
+        }
         Ok(TableItem {
             id: e.id,
             value_isk: e.value_isk,
@@ -129,7 +162,9 @@ impl From<Chair> for EquipmentRecord {
 impl TryFrom<EquipmentRecord> for Chair {
     type Error = String;
     fn try_from(e: EquipmentRecord) -> Result<Self, Self::Error> {
-        if e.kind != EquipmentKind::Chair { return Err("Ekki Chair".into()); }
+        if e.kind != EquipmentKind::Chair {
+            return Err("Ekki Chair".into());
+        }
         Ok(Chair {
             id: e.id,
             value_isk: e.value_isk,
@@ -156,7 +191,9 @@ impl From<Projector> for EquipmentRecord {
 impl TryFrom<EquipmentRecord> for Projector {
     type Error = String;
     fn try_from(e: EquipmentRecord) -> Result<Self, Self::Error> {
-        if e.kind != EquipmentKind::Projector { return Err("Ekki Projector".into()); }
+        if e.kind != EquipmentKind::Projector {
+            return Err("Ekki Projector".into());
+        }
         Ok(Projector {
             id: e.id,
             value_isk: e.value_isk,

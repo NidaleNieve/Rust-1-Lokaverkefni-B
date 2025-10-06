@@ -1,9 +1,9 @@
-use rusqlite::{Connection, params, OptionalExtension};
-use std::path::Path;
+use rusqlite::{params, Connection, OptionalExtension};
 use std::fs;
+use std::path::Path;
 use std::str::FromStr;
 
-use crate::models::{EquipmentKind, EquipmentRecord, House, Location, ChairKind};
+use crate::models::{ChairKind, EquipmentKind, EquipmentRecord, House, Location};
 
 #[derive(thiserror::Error, Debug)]
 pub enum DbError {
@@ -28,13 +28,19 @@ pub fn insert_equipment(conn: &Connection, rec: &EquipmentRecord) -> Result<i64,
     // Validate domain rules
     match rec.kind {
         EquipmentKind::Table => {
-            if rec.seats.is_none() { return Err(DbError::Invalid("Borð þarf seats".into())); }
+            if rec.seats.is_none() {
+                return Err(DbError::Invalid("Borð þarf seats".into()));
+            }
         }
         EquipmentKind::Chair => {
-            if rec.chair_kind.is_none() { return Err(DbError::Invalid("Stóll þarf chair_kind".into())); }
+            if rec.chair_kind.is_none() {
+                return Err(DbError::Invalid("Stóll þarf chair_kind".into()));
+            }
         }
         EquipmentKind::Projector => {
-            if rec.lumens.is_none() { return Err(DbError::Invalid("Skjávarpi þarf lumens".into())); }
+            if rec.lumens.is_none() {
+                return Err(DbError::Invalid("Skjávarpi þarf lumens".into()));
+            }
         }
     }
 
@@ -103,7 +109,10 @@ pub fn list_by_house(conn: &Connection, house: House) -> Result<Vec<EquipmentRec
     Ok(it.collect::<Result<Vec<_>, _>>()?)
 }
 
-pub fn list_by_kind(conn: &Connection, kind: EquipmentKind) -> Result<Vec<EquipmentRecord>, DbError> {
+pub fn list_by_kind(
+    conn: &Connection,
+    kind: EquipmentKind,
+) -> Result<Vec<EquipmentRecord>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT id, kind, value_isk, house, floor, room, seats, chair_kind, lumens
          FROM equipment_sorted WHERE kind = ?1",
@@ -124,12 +133,18 @@ pub fn list_by_room(conn: &Connection, loc: &Location) -> Result<Vec<EquipmentRe
     Ok(it.collect::<Result<Vec<_>, _>>()?)
 }
 
-pub fn list_by_floor(conn: &Connection, house: House, floor: u8) -> Result<Vec<EquipmentRecord>, DbError> {
+pub fn list_by_floor(
+    conn: &Connection,
+    house: House,
+    floor: u8,
+) -> Result<Vec<EquipmentRecord>, DbError> {
     let mut stmt = conn.prepare(
         "SELECT id, kind, value_isk, house, floor, room, seats, chair_kind, lumens
          FROM equipment_sorted WHERE house = ?1 AND floor = ?2",
     )?;
-    let it = stmt.query_map(params![house.to_string(), floor as i64], |row| row_to_rec(row))?;
+    let it = stmt.query_map(params![house.to_string(), floor as i64], |row| {
+        row_to_rec(row)
+    })?;
     Ok(it.collect::<Result<Vec<_>, _>>()?)
 }
 
@@ -146,7 +161,11 @@ fn row_to_rec(row: &rusqlite::Row<'_>) -> rusqlite::Result<EquipmentRecord> {
     let lumens: Option<i64> = row.get(8)?;
 
     let house = crate::models::House::from_str(&house_s).unwrap();
-    let loc = Location { house, floor: floor_i as u8, room: room_i as u16 };
+    let loc = Location {
+        house,
+        floor: floor_i as u8,
+        room: room_i as u16,
+    };
 
     Ok(EquipmentRecord {
         id: Some(id),
@@ -154,7 +173,9 @@ fn row_to_rec(row: &rusqlite::Row<'_>) -> rusqlite::Result<EquipmentRecord> {
         value_isk,
         location: loc,
         seats: seats.map(|x| x as u8),
-        chair_kind: chair_kind_s.as_deref().and_then(|s| ChairKind::try_from_db_str(s).ok()),
+        chair_kind: chair_kind_s
+            .as_deref()
+            .and_then(|s| ChairKind::try_from_db_str(s).ok()),
         lumens: lumens.map(|x| x as u32),
     })
 }

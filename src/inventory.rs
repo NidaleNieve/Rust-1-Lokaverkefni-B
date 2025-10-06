@@ -1,7 +1,7 @@
 use crate::db;
 use crate::models::*;
 use rusqlite::Connection;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub struct Inventory {
     conn: Connection,
@@ -43,7 +43,9 @@ impl Inventory {
 
     // JSON Export/Import
     pub fn export_json(&self, path: &str) -> Result<usize, std::io::Error> {
-        let items = self.all().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        let items = self
+            .all()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         let dump = JsonDump { version: 1, items };
         let data = serde_json::to_string_pretty(&dump).unwrap();
         std::fs::write(path, data)?;
