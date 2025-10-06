@@ -1,0 +1,11 @@
+[package]
+name = "CLAUDE-Lokaverkefni-B"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.28"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.32", features = ["bundled"] }
+regex = "1.10"
