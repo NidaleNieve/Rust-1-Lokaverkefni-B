@@ -1,0 +1,50 @@
+[
+  {
+    "Projector": {
+      "id": 3,
+      "location": {
+        "building": "Hateigssvegur",
+        "floor": 3,
+        "room": 68
+      },
+      "value": 5600,
+      "lumens": 4000
+    }
+  },
+  {
+    "Table": {
+      "id": 1,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 3,
+        "room": 35
+      },
+      "value": 57189,
+      "seats": 10
+    }
+  },
+  {
+    "Chair": {
+      "id": 2,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 3,
+        "room": 68
+      },
+      "value": 9123,
+      "chair_type": "Annad"
+    }
+  },
+  {
+    "Chair": {
+      "id": 4,
+      "location": {
+        "building": "Skolavorduhollt",
+        "floor": 3,
+        "room": 53
+      },
+      "value": 55555,
+      "chair_type": "Skolastoll"
+    }
+  }
+]
