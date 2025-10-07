@@ -35,9 +35,9 @@ fn main() -> Result<(), eframe::Error> {
 #[derive(PartialEq)]
 enum AppSection {
     Register,
-    Update,
-    Delete,
-    Display,
+    Edit,
+    Search,
+    Print,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -84,14 +84,16 @@ struct EquipmentApp {
     reg_chair_type: ChairType,
     reg_projector_lumens: String,
     
-    // Update fields
-    upd_id: String,
-    upd_building: Building,
-    upd_floor: u8,
-    upd_room: u8,
+    // Edit fields (combined update/delete)
+    edit_id: String,
+    edit_equipment: Option<Equipment>,
+    edit_building: Building,
+    edit_floor: u8,
+    edit_room: u8,
     
-    // Delete fields
-    del_id: String,
+    // Search fields
+    search_query: String,
+    search_results: Vec<Equipment>,
     
     // Display fields
     display_filter: DisplayFilter,
@@ -113,9 +115,6 @@ struct EquipmentApp {
     message: String,
     error_message: String,
     
-    // Search
-    search_query: String,
-    
     // Statistics
     show_stats: bool,
 }
@@ -135,11 +134,13 @@ impl EquipmentApp {
             reg_table_seats: 4,
             reg_chair_type: ChairType::Skolastoll,
             reg_projector_lumens: String::new(),
-            upd_id: String::new(),
-            upd_building: Building::Hafnarfjordur,
-            upd_floor: 1,
-            upd_room: 1,
-            del_id: String::new(),
+            edit_id: String::new(),
+            edit_equipment: None,
+            edit_building: Building::Hafnarfjordur,
+            edit_floor: 1,
+            edit_room: 1,
+            search_query: String::new(),
+            search_results: Vec::new(),
             display_filter: DisplayFilter::All,
             display_building: Building::Hafnarfjordur,
             display_type: EquipmentType::Table,
@@ -152,7 +153,6 @@ impl EquipmentApp {
             sort_order: SortOrder::Ascending,
             message: String::new(),
             error_message: String::new(),
-            search_query: String::new(),
             show_stats: false,
         }
     }
@@ -299,37 +299,108 @@ impl EquipmentApp {
         }
     }
     
-    fn update_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("🔄 Uppfæra staðsetningu");
+    fn edit_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("✏️ Breyta búnaði");
         ui.separator();
         
         ui.horizontal(|ui| {
             ui.label("ID búnaðar:");
-            ui.text_edit_singleline(&mut self.upd_id);
+            ui.text_edit_singleline(&mut self.edit_id);
+            if ui.button("🔍 Sækja").clicked() {
+                self.fetch_equipment_for_edit();
+            }
         });
         
         ui.add_space(10.0);
         
-        ui.label("Ný staðsetning:");
-        Self::render_location_input(
-            ui,
-            &mut self.upd_building,
-            &mut self.upd_floor,
-            &mut self.upd_room,
-        );
-        
-        ui.add_space(20.0);
-        
-        if ui.button("✅ Uppfæra staðsetningu").clicked() {
-            self.update_location();
+        // Show equipment info if fetched
+        if let Some(equipment) = &self.edit_equipment {
+            ui.group(|ui| {
+                ui.heading("📋 Upplýsingar um búnað");
+                ui.add_space(5.0);
+                
+                egui::Grid::new("edit_info_grid")
+                    .num_columns(2)
+                    .spacing([40.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("ID:");
+                        ui.label(format!("{}", equipment.get_id().unwrap_or(0)));
+                        ui.end_row();
+                        
+                        ui.label("Tegund:");
+                        ui.label(equipment.get_type_name());
+                        ui.end_row();
+                        
+                        ui.label("Staðsetning:");
+                        let location = match equipment {
+                            Equipment::Table(t) => &t.location,
+                            Equipment::Chair(c) => &c.location,
+                            Equipment::Projector(p) => &p.location,
+                        };
+                        ui.label(format!("{}", location));
+                        ui.end_row();
+                        
+                        ui.label("Verðmæti:");
+                        let value = match equipment {
+                            Equipment::Table(t) => t.value,
+                            Equipment::Chair(c) => c.value,
+                            Equipment::Projector(p) => p.value,
+                        };
+                        ui.label(format!("{} kr.", value));
+                        ui.end_row();
+                        
+                        ui.label("Lýsing:");
+                        ui.label(format!("{}", equipment));
+                        ui.end_row();
+                    });
+            });
+            
+            ui.add_space(15.0);
+            ui.separator();
+            ui.add_space(15.0);
+            
+            // Update location section
+            ui.heading("🔄 Uppfæra staðsetningu");
+            ui.add_space(10.0);
+            
+            Self::render_location_input(
+                ui,
+                &mut self.edit_building,
+                &mut self.edit_floor,
+                &mut self.edit_room,
+            );
+            
+            ui.add_space(15.0);
+            
+            if ui.button("✅ Uppfæra staðsetningu").clicked() {
+                self.update_location();
+            }
+            
+            ui.add_space(20.0);
+            ui.separator();
+            ui.add_space(15.0);
+            
+            // Delete section
+            ui.heading("🗑️ Eyða búnaði");
+            ui.add_space(10.0);
+            
+            ui.label("⚠️ Varúð: Þessi aðgerð er óafturkræf!");
+            ui.add_space(10.0);
+            
+            if ui.button("❌ Eyða búnaði").clicked() {
+                self.delete_equipment();
+            }
+        } else if !self.edit_id.is_empty() {
+            ui.label("Sláðu inn ID og smelltu á 'Sækja' til að skoða búnað");
         }
     }
     
-    fn update_location(&mut self) {
+    fn fetch_equipment_for_edit(&mut self) {
         self.error_message.clear();
         self.message.clear();
         
-        let id = match self.upd_id.parse::<i64>() {
+        let id = match self.edit_id.parse::<i64>() {
             Ok(i) => i,
             Err(_) => {
                 self.error_message = "ID verður að vera tala".to_string();
@@ -337,13 +408,52 @@ impl EquipmentApp {
             }
         };
         
-        let location = Location::new(self.upd_building, self.upd_floor, self.upd_room);
+        let db = self.db.lock().unwrap();
+        match db.get_equipment_by_id(id) {
+            Ok(Some(equipment)) => {
+                // Set the location fields to current location
+                let location = match &equipment {
+                    Equipment::Table(t) => &t.location,
+                    Equipment::Chair(c) => &c.location,
+                    Equipment::Projector(p) => &p.location,
+                };
+                self.edit_building = location.building;
+                self.edit_floor = location.floor;
+                self.edit_room = location.room;
+                self.edit_equipment = Some(equipment);
+            }
+            Ok(None) => {
+                self.error_message = format!("❌ Búnaður með ID {} fannst ekki", id);
+                self.edit_equipment = None;
+            }
+            Err(e) => {
+                self.error_message = format!("❌ Villa við að sækja búnað: {}", e);
+                self.edit_equipment = None;
+            }
+        }
+    }
+    
+    fn update_location(&mut self) {
+        self.error_message.clear();
+        self.message.clear();
+        
+        let id = match self.edit_id.parse::<i64>() {
+            Ok(i) => i,
+            Err(_) => {
+                self.error_message = "ID verður að vera tala".to_string();
+                return;
+            }
+        };
+        
+        let location = Location::new(self.edit_building, self.edit_floor, self.edit_room);
         
         let db = self.db.lock().unwrap();
         match db.update_location(id, &location) {
             Ok(_) => {
                 self.message = format!("✅ Staðsetning uppfærð fyrir búnað með ID: {}", id);
-                self.upd_id.clear();
+                // Refresh the equipment info
+                drop(db);
+                self.fetch_equipment_for_edit();
             }
             Err(e) => {
                 self.error_message = format!("❌ Villa við uppfærslu: {}", e);
@@ -351,27 +461,11 @@ impl EquipmentApp {
         }
     }
     
-    fn delete_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("🗑️ Eyða búnaði");
-        ui.separator();
-        
-        ui.horizontal(|ui| {
-            ui.label("ID búnaðar:");
-            ui.text_edit_singleline(&mut self.del_id);
-        });
-        
-        ui.add_space(20.0);
-        
-        if ui.button("❌ Eyða búnaði").clicked() {
-            self.delete_equipment();
-        }
-    }
-    
     fn delete_equipment(&mut self) {
         self.error_message.clear();
         self.message.clear();
         
-        let id = match self.del_id.parse::<i64>() {
+        let id = match self.edit_id.parse::<i64>() {
             Ok(i) => i,
             Err(_) => {
                 self.error_message = "ID verður að vera tala".to_string();
@@ -383,7 +477,8 @@ impl EquipmentApp {
         match db.delete_equipment(id) {
             Ok(_) => {
                 self.message = format!("✅ Búnaði með ID {} eytt", id);
-                self.del_id.clear();
+                self.edit_id.clear();
+                self.edit_equipment = None;
             }
             Err(e) => {
                 self.error_message = format!("❌ Villa við eyðingu: {}", e);
@@ -391,8 +486,93 @@ impl EquipmentApp {
         }
     }
     
-    fn display_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("📋 Birta búnað");
+    fn search_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("� Leita að búnaði");
+        ui.separator();
+        
+        ui.horizontal(|ui| {
+            ui.label("Leit:");
+            ui.text_edit_singleline(&mut self.search_query);
+            if ui.button("🔍 Leita").clicked() {
+                self.perform_search();
+            }
+        });
+        
+        ui.add_space(10.0);
+        
+        // Display search results
+        if !self.search_results.is_empty() {
+            ui.separator();
+            ui.label(format!("Fjöldi niðurstaðna: {} atriði", self.search_results.len()));
+            ui.add_space(10.0);
+            
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::Grid::new("search_results_grid")
+                    .striped(true)
+                    .spacing([10.0, 8.0])
+                    .show(ui, |ui| {
+                        // Header
+                        ui.label("ID");
+                        ui.label("Tegund");
+                        ui.label("Staðsetning");
+                        ui.label("Verðmæti");
+                        ui.label("Lýsing");
+                        ui.end_row();
+                        
+                        // Data rows
+                        for equipment in &self.search_results {
+                            let id = equipment.get_id().unwrap_or(0);
+                            ui.label(id.to_string());
+                            ui.label(equipment.get_type_name());
+                            
+                            let location_str = match equipment {
+                                Equipment::Table(t) => format!("{}", t.location),
+                                Equipment::Chair(c) => format!("{}", c.location),
+                                Equipment::Projector(p) => format!("{}", p.location),
+                            };
+                            ui.label(location_str);
+                            
+                            let value = match equipment {
+                                Equipment::Table(t) => t.value,
+                                Equipment::Chair(c) => c.value,
+                                Equipment::Projector(p) => p.value,
+                            };
+                            ui.label(format!("{} kr.", value));
+                            
+                            ui.label(format!("{}", equipment));
+                            ui.end_row();
+                        }
+                    });
+            });
+        } else if !self.search_query.is_empty() {
+            ui.label("Engar niðurstöður fundust");
+        }
+    }
+    
+    fn perform_search(&mut self) {
+        self.error_message.clear();
+        
+        let db = self.db.lock().unwrap();
+        match db.get_all_equipment() {
+            Ok(all_equipment) => {
+                let query_lower = self.search_query.to_lowercase();
+                self.search_results = all_equipment
+                    .into_iter()
+                    .filter(|eq| {
+                        let equipment_str = format!("{}", eq).to_lowercase();
+                        equipment_str.contains(&query_lower) || 
+                        eq.get_id().unwrap_or(0).to_string().contains(&query_lower)
+                    })
+                    .collect();
+            }
+            Err(e) => {
+                self.error_message = format!("❌ Villa við leit: {}", e);
+            }
+        }
+    }
+    
+    fn print_section(&mut self, ui: &mut egui::Ui) {
+        ui.heading("�️ Prenta búnað");
         ui.separator();
         
         // Statistics toggle
@@ -417,12 +597,6 @@ impl EquipmentApp {
             ui.add_space(10.0);
             ui.separator();
         }
-        
-        // Search bar
-        ui.horizontal(|ui| {
-            ui.label("🔍 Leita:");
-            ui.text_edit_singleline(&mut self.search_query);
-        });
         
         ui.add_space(10.0);
         
@@ -551,12 +725,6 @@ impl EquipmentApp {
                         for equipment in &self.displayed_equipment {
                             let id = equipment.get_id().unwrap_or(0);
                             let id_str = id.to_string();
-                            
-                            // Filter by search
-                            let equipment_str = format!("{}", equipment).to_lowercase();
-                            if !self.search_query.is_empty() && !equipment_str.contains(&self.search_query.to_lowercase()) {
-                                continue;
-                            }
                             
                             ui.label(&id_str);
                             ui.label(equipment.get_type_name());
@@ -844,56 +1012,97 @@ impl EquipmentApp {
 
 impl eframe::App for EquipmentApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Custom style
+        // Modern light blue color scheme
         let mut style = (*ctx.style()).clone();
+        
+        // Set colors
+        let light_blue = egui::Color32::from_rgb(173, 216, 230);  // Light blue
+        let hover_blue = egui::Color32::from_rgb(135, 206, 250);  // Sky blue for hover
+        let active_blue = egui::Color32::from_rgb(100, 149, 237);  // Cornflower blue for active
+        let text_color = egui::Color32::from_rgb(25, 25, 60);      // Dark blue text
+        
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.spacing.button_padding = egui::vec2(12.0, 6.0);
+        
+        // Widget colors
+        style.visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(240, 248, 255);
+        style.visuals.widgets.inactive.bg_fill = light_blue;
+        style.visuals.widgets.hovered.bg_fill = hover_blue;
+        style.visuals.widgets.active.bg_fill = active_blue;
+        
+        // Selection colors
+        style.visuals.selection.bg_fill = active_blue;
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, text_color);
+        
+        // Make buttons rounder and more modern
+        style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.hovered.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.active.rounding = egui::Rounding::same(8.0);
+        
+        // Add subtle shadows/strokes on hover
+        style.visuals.widgets.hovered.expansion = 2.0;
+        
         ctx.set_style(style);
         
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Header with gradient-like effect
+            // Header with modern styling
             ui.horizontal(|ui| {
-                ui.heading("🏫 Búnaðarlisti Tækniskólans");
+                ui.heading(egui::RichText::new("🏫 Búnaðarlisti Tækniskólans")
+                    .color(text_color)
+                    .size(24.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("Gagnagrunnur: equipment.db"));
+                    ui.label(egui::RichText::new("Gagnagrunnur: equipment.db")
+                        .color(egui::Color32::from_rgb(80, 80, 100)));
                 });
             });
             ui.separator();
             
-            // Navigation with better styling
+            // Navigation with hover effects
             ui.horizontal(|ui| {
-                ui.style_mut().spacing.item_spacing.x = 4.0;
+                ui.style_mut().spacing.item_spacing.x = 6.0;
                 
                 let register_btn = ui.selectable_label(
                     self.current_section == AppSection::Register,
-                    "📝 Skrá"
+                    egui::RichText::new("📝 Skrá").size(16.0)
                 );
+                if register_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
                 if register_btn.clicked() {
                     self.current_section = AppSection::Register;
                 }
                 
-                let update_btn = ui.selectable_label(
-                    self.current_section == AppSection::Update,
-                    "🔄 Uppfæra"
+                let edit_btn = ui.selectable_label(
+                    self.current_section == AppSection::Edit,
+                    egui::RichText::new("✏️ Breyta").size(16.0)
                 );
-                if update_btn.clicked() {
-                    self.current_section = AppSection::Update;
+                if edit_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if edit_btn.clicked() {
+                    self.current_section = AppSection::Edit;
                 }
                 
-                let delete_btn = ui.selectable_label(
-                    self.current_section == AppSection::Delete,
-                    "🗑️ Eyða"
+                let search_btn = ui.selectable_label(
+                    self.current_section == AppSection::Search,
+                    egui::RichText::new("� Leita").size(16.0)
                 );
-                if delete_btn.clicked() {
-                    self.current_section = AppSection::Delete;
+                if search_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if search_btn.clicked() {
+                    self.current_section = AppSection::Search;
                 }
                 
-                let display_btn = ui.selectable_label(
-                    self.current_section == AppSection::Display,
-                    "📋 Birta"
+                let print_btn = ui.selectable_label(
+                    self.current_section == AppSection::Print,
+                    egui::RichText::new("�️ Prenta").size(16.0)
                 );
-                if display_btn.clicked() {
-                    self.current_section = AppSection::Display;
+                if print_btn.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if print_btn.clicked() {
+                    self.current_section = AppSection::Print;
                 }
             });
             
@@ -902,15 +1111,15 @@ impl eframe::App for EquipmentApp {
             // Messages with better visibility
             if !self.message.is_empty() {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("✓").color(egui::Color32::GREEN).size(20.0));
-                    ui.label(egui::RichText::new(&self.message).color(egui::Color32::GREEN).strong());
+                    ui.label(egui::RichText::new("✓").color(egui::Color32::from_rgb(46, 125, 50)).size(20.0));
+                    ui.label(egui::RichText::new(&self.message).color(egui::Color32::from_rgb(46, 125, 50)).strong());
                 });
                 ui.add_space(5.0);
             }
             if !self.error_message.is_empty() {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("✗").color(egui::Color32::RED).size(20.0));
-                    ui.label(egui::RichText::new(&self.error_message).color(egui::Color32::RED).strong());
+                    ui.label(egui::RichText::new("✗").color(egui::Color32::from_rgb(211, 47, 47)).size(20.0));
+                    ui.label(egui::RichText::new(&self.error_message).color(egui::Color32::from_rgb(211, 47, 47)).strong());
                 });
                 ui.add_space(5.0);
             }
@@ -920,9 +1129,9 @@ impl eframe::App for EquipmentApp {
             // Content
             match self.current_section {
                 AppSection::Register => self.register_section(ui),
-                AppSection::Update => self.update_section(ui),
-                AppSection::Delete => self.delete_section(ui),
-                AppSection::Display => self.display_section(ui),
+                AppSection::Edit => self.edit_section(ui),
+                AppSection::Search => self.search_section(ui),
+                AppSection::Print => self.print_section(ui),
             }
         });
     }
