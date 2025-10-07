@@ -13,6 +13,30 @@
   },
   {
     "Table": {
+      "id": 5,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 1,
+        "room": 1
+      },
+      "value": 123123,
+      "seats": 4
+    }
+  },
+  {
+    "Table": {
+      "id": 6,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 1,
+        "room": 1
+      },
+      "value": 123123,
+      "seats": 4
+    }
+  },
+  {
+    "Table": {
       "id": 1,
       "location": {
         "building": "Hafnarfjordur",

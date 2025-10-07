@@ -9,3 +9,19 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
 regex = "1.10"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[package.metadata.bundle]
+name = "Búnaðarlisti Tækniskólans"
+identifier = "is.ts.bunadarlisti"
+resources = ["assets/app_icon.jpg"]
+# For proper OS-level app icons when bundling installers/apps:
+# - macOS: provide an .icns file
+# - Windows: provide an .ico file
+icon = [
+	"assets/app_icon.icns", # macOS (optional; recommended when bundling)
+	"assets/app_icon.ico"   # Windows (optional; recommended when bundling)
+]

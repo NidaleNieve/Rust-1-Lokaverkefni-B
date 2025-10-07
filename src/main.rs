@@ -10,6 +10,8 @@ use chair::Chair;
 use chair_type::ChairType;
 use database::Database;
 use eframe::egui;
+use eframe::egui::{IconData, TextureHandle};
+use eframe::epaint::ColorImage;
 use equipment::Equipment;
 use location::{Building, Location};
 use projector::Projector;
@@ -18,12 +20,19 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 fn main() -> Result<(), eframe::Error> {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1400.0, 900.0])
-            .with_min_inner_size([1200.0, 700.0]),
-        ..Default::default()
-    };
+    // Build viewport and set app icon if available
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1400.0, 900.0])
+        .with_min_inner_size([1200.0, 700.0]);
+    if let Ok(bytes) = std::fs::read("assets/app_icon.jpg") {
+        if let Ok(img) = image::load_from_memory(&bytes) {
+            let rgba = img.to_rgba8();
+            let (width, height) = (rgba.width(), rgba.height());
+            let icon = IconData { rgba: rgba.to_vec(), width, height };
+            viewport = viewport.with_icon(icon);
+        }
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
 
     eframe::run_native(
         "Búnaðarlisti Tækniskólans",
@@ -73,6 +82,8 @@ enum SortOrder {
 struct EquipmentApp {
     db: Arc<Mutex<Database>>,
     current_section: AppSection,
+    // In-app icon texture
+    app_icon_tex: Option<TextureHandle>,
     
     // Registration fields
     reg_equipment_type: EquipmentType,
@@ -126,6 +137,7 @@ impl EquipmentApp {
         Self {
             db: Arc::new(Mutex::new(db)),
             current_section: AppSection::Register,
+            app_icon_tex: None,
             reg_equipment_type: EquipmentType::Table,
             reg_building: Building::Hafnarfjordur,
             reg_floor: 1,
@@ -1056,10 +1068,28 @@ impl eframe::App for EquipmentApp {
         
         ctx.set_style(style);
         
+        // Lazily load app icon texture for rendering inside the app
+        if self.app_icon_tex.is_none() {
+            if let Ok(bytes) = std::fs::read("assets/app_icon.jpg") {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let rgba = img.to_rgba8();
+                    let size = [rgba.width() as usize, rgba.height() as usize];
+                    let pixels = rgba.into_raw();
+                    let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
+                    let tex = ctx.load_texture("app_icon", color_image, Default::default());
+                    self.app_icon_tex = Some(tex);
+                }
+            }
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             // Header with modern styling
             ui.horizontal(|ui| {
-                ui.heading(egui::RichText::new("🏫 Búnaðarlisti Tækniskólans")
+                if let Some(icon) = &self.app_icon_tex {
+                    let desired = egui::Vec2 { x: 28.0, y: 28.0 };
+                    ui.image((icon.id(), desired));
+                }
+                ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans")
                     .color(text_color)
                     .size(24.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
