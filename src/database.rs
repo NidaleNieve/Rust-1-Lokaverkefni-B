@@ -177,6 +177,11 @@ impl Database {
         Ok(())
     }
 
+    pub fn clear_all_equipment(&self) -> Result<()> {
+        self.conn.execute("DELETE FROM equipment", [])?;
+        Ok(())
+    }
+
     pub fn get_equipment_by_building(&self, building: Building) -> Result<Vec<Equipment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, building, floor, room, value, extra_data 

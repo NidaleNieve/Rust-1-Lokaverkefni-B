@@ -798,6 +798,18 @@ impl EquipmentApp {
         
         self.sort_equipment();
     }
+
+    fn sort_indicator(&self, column: SortColumn) -> &'static str {
+        if let Some(current) = self.sort_column {
+            if current == column {
+                return match self.sort_order {
+                    SortOrder::Ascending => " ^",
+                    SortOrder::Descending => " v",
+                };
+            }
+        }
+        ""
+    }
     
     fn show_statistics(&self, ui: &mut egui::Ui) {
         let db = self.db.lock().unwrap();
@@ -1013,13 +1025,24 @@ impl EquipmentApp {
         match std::fs::read_to_string(&path) {
             Ok(json) => match serde_json::from_str::<Vec<Equipment>>(&json) {
                 Ok(equipment) => {
-                    let db = self.db.lock().unwrap();
-                    let mut count = 0;
-                    for mut eq in equipment {
-                        eq.set_id(0);
-                        if db.insert_equipment(&eq).is_ok() { count += 1; }
+                    let mut inserted = 0;
+                    {
+                        let db = self.db.lock().unwrap();
+                        if let Err(e) = db.clear_all_equipment() {
+                            self.error_message = format!("❌ Tókst ekki að tæma gagnagrunn: {}", e);
+                            return;
+                        }
+                        for mut eq in equipment {
+                            eq.set_id(0);
+                            if db.insert_equipment(&eq).is_ok() { inserted += 1; }
+                        }
                     }
-                    self.message = format!("✅ {} búnaður hlaðinn úr {}", count, path.display());
+
+                    self.displayed_equipment.clear();
+                    self.search_results.clear();
+                    self.sort_column = None;
+                    self.load_equipment();
+                    self.message = format!("✅ {} búnaður hlaðinn úr {}", inserted, path.display());
                 }
                 Err(e) => { self.error_message = format!("❌ Villa við að lesa JSON: {}", e); }
             },
@@ -1062,24 +1085,35 @@ impl eframe::App for EquipmentApp {
         
         ctx.set_style(style);
 
-        // Dark header with white main title and sidebar toggle
-        egui::TopBottomPanel::top("app_header").frame(egui::Frame::none()).show(ctx, |ui| {
-            let header_bg = egui::Color32::from_rgb(10, 56, 113);
+        // Modern header with subtle color and sidebar toggle
+        egui::TopBottomPanel::top("app_header")
+            .frame(egui::Frame::none())
+            .show(ctx, |ui| {
+            let header_bg = egui::Color32::from_rgb(60, 100, 140); // subtle blue-grey
             let rect = ui.max_rect();
             ui.painter().rect_filled(rect, 0.0, header_bg);
             ui.horizontal(|ui| {
+                ui.add_space(14.0);
                 if let Some(icon) = &self.app_icon_tex {
                     let desired = egui::Vec2 { x: 28.0, y: 28.0 };
                     ui.image((icon.id(), desired));
                 }
                 ui.add_space(6.0);
-                ui.heading(egui::RichText::new("Búnaðaristi Tækniskólans").color(egui::Color32::WHITE).size(24.0));
+                ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans").color(egui::Color32::WHITE).size(24.0));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let btn = egui::Button::new(egui::RichText::new(if self.show_sidebar { "↔︎ Fela yfirlit" } else { "📋 Sýna yfirlit" }).color(egui::Color32::WHITE));
-                    if ui.add(btn).clicked() { self.show_sidebar = !self.show_sidebar; }
+                    ui.add_space(8.0);
+                    let btn = egui::Button::new(egui::RichText::new(if self.show_sidebar { "↔︎ Fela lista" } else { "📋 Sjá lista" }).color(egui::Color32::WHITE));
+                    if ui.add(btn).clicked() { 
+                        self.show_sidebar = !self.show_sidebar; 
+                        // Refresh sidebar data when opening
+                        if self.show_sidebar {
+                            self.display_filter = DisplayFilter::All;
+                            self.load_equipment();
+                        }
+                    }
                 });
             });
-            ui.add_space(6.0);
+            ui.add_space(4.0);
         });
         
         // Lazily load app icon texture for rendering inside the app
@@ -1096,57 +1130,116 @@ impl eframe::App for EquipmentApp {
             }
         }
 
-        // Right sidebar mirrors "Prenta -> Allur búnaður" view
+        // Right sidebar with full equipment list (auto-refreshes)
         if self.show_sidebar {
-            egui::SidePanel::right("right_sidebar").resizable(true).default_width(420.0).show(ctx, |ui| {
-                if self.displayed_equipment.is_empty() || !matches!(self.display_filter, DisplayFilter::All) {
-                    self.display_filter = DisplayFilter::All;
-                    self.load_equipment();
-                }
-                ui.heading("📋 Allur búnaður");
-                ui.add_space(6.0);
-                ui.label(format!("Fjöldi: {}", self.displayed_equipment.len()));
-                ui.add_space(6.0);
-                let show_desc = ui.available_width() > 560.0;
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::Grid::new("sidebar_equipment_grid").striped(true).spacing([10.0, 8.0]).show(ui, |ui| {
-                        if ui.button("ID ▲▼").clicked() { self.toggle_sort(SortColumn::Id); }
-                        if ui.button("Tegund ▲▼").clicked() { self.toggle_sort(SortColumn::Type); }
-                        if ui.button("Staðsetning ▲▼").clicked() { self.toggle_sort(SortColumn::Location); }
-                        if ui.button("Verðmæti ▲▼").clicked() { self.toggle_sort(SortColumn::Value); }
-                        if show_desc { ui.label("Lýsing"); }
-                        ui.end_row();
-                        for equipment in &self.displayed_equipment {
-                            ui.label(equipment.get_id().unwrap_or(0).to_string());
-                            ui.label(equipment.get_type_name());
-                            let location_str = match equipment { Equipment::Table(t) => format!("{}", t.location), Equipment::Chair(c) => format!("{}", c.location), Equipment::Projector(p) => format!("{}", p.location) };
-                            ui.label(location_str);
-                            let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
-                            ui.label(format!("{} kr.", value));
-                            if show_desc { ui.label(format!("{}", equipment)); }
-                            ui.end_row();
+            // Always reload fresh data for sidebar
+            let db = self.db.lock().unwrap();
+            let sidebar_data = db.get_all_equipment().unwrap_or_default();
+            drop(db);
+            
+            egui::SidePanel::right("right_sidebar")
+                .resizable(true)
+                .default_width(420.0)
+                .min_width(150.0)
+                .max_width(ctx.screen_rect().width() * 0.7)
+                .show(ctx, |ui| {
+                    ui.heading("📋 Allur búnaður");
+                    ui.add_space(6.0);
+                    ui.label(format!("Fjöldi: {} atriði", sidebar_data.len()));
+                    
+                    // Sort reset button
+                    if self.sort_column.is_some() {
+                        if ui.button("🔄 Endurstilla röðun").clicked() {
+                            self.sort_column = None;
                         }
+                    }
+                    
+                    ui.add_space(6.0);
+                    
+                    // Clone data for sorting
+                    let mut sorted_data = sidebar_data.clone();
+                    if let Some(column) = self.sort_column {
+                        let ascending = matches!(self.sort_order, SortOrder::Ascending);
+                        sorted_data.sort_by(|a, b| {
+                            let cmp = match column {
+                                SortColumn::Id => a.get_id().unwrap_or(0).cmp(&b.get_id().unwrap_or(0)),
+                                SortColumn::Type => a.get_type_name().cmp(b.get_type_name()),
+                                SortColumn::Location => {
+                                    let loc_a = match a { Equipment::Table(t) => &t.location, Equipment::Chair(c) => &c.location, Equipment::Projector(p) => &p.location };
+                                    let loc_b = match b { Equipment::Table(t) => &t.location, Equipment::Chair(c) => &c.location, Equipment::Projector(p) => &p.location };
+                                    format!("{}", loc_a).cmp(&format!("{}", loc_b))
+                                }
+                                SortColumn::Value => {
+                                    let val_a = match a { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
+                                    let val_b = match b { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
+                                    val_a.cmp(&val_b)
+                                }
+                            };
+                            if ascending { cmp } else { cmp.reverse() }
+                        });
+                    }
+                    
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let show_description = ui.available_width() > 460.0;
+                        use egui_extras::{TableBuilder, Column};
+                        let mut table = TableBuilder::new(ui)
+                            .striped(true)
+                            .resizable(true)
+                            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                            .column(Column::initial(60.0).resizable(true))
+                            .column(Column::initial(110.0).resizable(true))
+                            .column(Column::initial(130.0).resizable(true))
+                            .column(Column::initial(110.0).resizable(true));
+
+                        if show_description {
+                            table = table.column(Column::remainder().resizable(true));
+                        }
+
+                        table
+                            .header(20.0, |mut header| {
+                                header.col(|ui| {
+                                    if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); }
+                                });
+                                header.col(|ui| {
+                                    if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); }
+                                });
+                                header.col(|ui| {
+                                    if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); }
+                                });
+                                header.col(|ui| {
+                                    if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); }
+                                });
+                                if show_description {
+                                    header.col(|ui| {
+                                        ui.label("Lýsing");
+                                    });
+                                }
+                            })
+                            .body(|mut body| {
+                                for equipment in &sorted_data {
+                                    body.row(18.0, |mut row| {
+                                        row.col(|ui| { ui.label(equipment.get_id().unwrap_or(0).to_string()); });
+                                        row.col(|ui| { ui.label(equipment.get_type_name()); });
+                                        row.col(|ui| {
+                                            let location_str = match equipment { Equipment::Table(t) => format!("{}", t.location), Equipment::Chair(c) => format!("{}", c.location), Equipment::Projector(p) => format!("{}", p.location) };
+                                            ui.label(location_str);
+                                        });
+                                        row.col(|ui| {
+                                            let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
+                                            ui.label(format!("{} kr.", value));
+                                        });
+                                        if show_description {
+                                            row.col(|ui| { ui.label(format!("{}", equipment)); });
+                                        }
+                                    });
+                                }
+                            });
                     });
                 });
-            });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Header with modern styling
-            ui.horizontal(|ui| {
-                if let Some(icon) = &self.app_icon_tex {
-                    let desired = egui::Vec2 { x: 28.0, y: 28.0 };
-                    ui.image((icon.id(), desired));
-                }
-                ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans")
-                    .color(text_color)
-                    .size(24.0));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new("Gagnagrunnur: equipment.db")
-                        .color(egui::Color32::from_rgb(80, 80, 100)));
-                });
-            });
-            ui.separator();
+            ui.add_space(4.0);
             
             // Navigation with hover effects
             ui.horizontal(|ui| {
