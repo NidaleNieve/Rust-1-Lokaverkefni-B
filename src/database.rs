@@ -87,22 +87,22 @@ impl Database {
             let value: u32 = row.get(5)?;
             let extra_data: String = row.get(6)?;
 
-            let building = Building::from_code(&building_code).unwrap();
-            let location = Location::new(building, floor, room);
+            let building = Building::try_from(building_code.as_str()).unwrap();
+            let location = Location::try_from((building, floor, room)).unwrap();
 
             let equipment = match type_name.as_str() {
                 "Table" => {
                     let seats = extra_data.parse::<u8>().unwrap_or(0);
-                    Equipment::Table(Table::new(location, value, seats).with_id(id))
+                    Equipment::Table(Table::try_from((location.clone(), value, seats)).unwrap().with_id(id))
                 }
                 "Chair" => {
                     let chair_type = ChairType::try_from(extra_data.as_str())
                         .unwrap_or(ChairType::Annad);
-                    Equipment::Chair(Chair::new(location, value, chair_type).with_id(id))
+                    Equipment::Chair(Chair::try_from((location.clone(), value, chair_type)).unwrap().with_id(id))
                 }
                 "Projector" => {
                     let lumens = extra_data.parse::<u32>().unwrap_or(0);
-                    Equipment::Projector(Projector::new(location, value, lumens).with_id(id))
+                    Equipment::Projector(Projector::try_from((location.clone(), value, lumens)).unwrap().with_id(id))
                 }
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
@@ -134,22 +134,22 @@ impl Database {
             let value: u32 = row.get(5)?;
             let extra_data: String = row.get(6)?;
 
-            let building = Building::from_code(&building_code).unwrap();
-            let location = Location::new(building, floor, room);
+            let building = Building::try_from(building_code.as_str()).unwrap();
+            let location = Location::try_from((building, floor, room)).unwrap();
 
             let equipment = match type_name.as_str() {
                 "Table" => {
                     let seats = extra_data.parse::<u8>().unwrap_or(0);
-                    Equipment::Table(Table::new(location, value, seats).with_id(id))
+                    Equipment::Table(Table::try_from((location.clone(), value, seats)).unwrap().with_id(id))
                 }
                 "Chair" => {
                     let chair_type = ChairType::try_from(extra_data.as_str())
                         .unwrap_or(ChairType::Annad);
-                    Equipment::Chair(Chair::new(location, value, chair_type).with_id(id))
+                    Equipment::Chair(Chair::try_from((location.clone(), value, chair_type)).unwrap().with_id(id))
                 }
                 "Projector" => {
                     let lumens = extra_data.parse::<u32>().unwrap_or(0);
-                    Equipment::Projector(Projector::new(location, value, lumens).with_id(id))
+                    Equipment::Projector(Projector::try_from((location.clone(), value, lumens)).unwrap().with_id(id))
                 }
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
@@ -194,22 +194,22 @@ impl Database {
             let value: u32 = row.get(5)?;
             let extra_data: String = row.get(6)?;
 
-            let building = Building::from_code(&building_code).unwrap();
-            let location = Location::new(building, floor, room);
+            let building = Building::try_from(building_code.as_str()).unwrap();
+            let location = Location::try_from((building, floor, room)).unwrap();
 
             let equipment = match type_name.as_str() {
                 "Table" => {
                     let seats = extra_data.parse::<u8>().unwrap_or(0);
-                    Equipment::Table(Table::new(location, value, seats).with_id(id))
+                    Equipment::Table(Table::try_from((location.clone(), value, seats)).unwrap().with_id(id))
                 }
                 "Chair" => {
                     let chair_type = ChairType::try_from(extra_data.as_str())
                         .unwrap_or(ChairType::Annad);
-                    Equipment::Chair(Chair::new(location, value, chair_type).with_id(id))
+                    Equipment::Chair(Chair::try_from((location.clone(), value, chair_type)).unwrap().with_id(id))
                 }
                 "Projector" => {
                     let lumens = extra_data.parse::<u32>().unwrap_or(0);
-                    Equipment::Projector(Projector::new(location, value, lumens).with_id(id))
+                    Equipment::Projector(Projector::try_from((location.clone(), value, lumens)).unwrap().with_id(id))
                 }
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
@@ -242,22 +242,22 @@ impl Database {
             let value: u32 = row.get(5)?;
             let extra_data: String = row.get(6)?;
 
-            let building = Building::from_code(&building_code).unwrap();
-            let location = Location::new(building, floor, room);
+            let building = Building::try_from(building_code.as_str()).unwrap();
+            let location = Location::try_from((building, floor, room)).unwrap();
 
             let equipment = match type_name.as_str() {
                 "Table" => {
                     let seats = extra_data.parse::<u8>().unwrap_or(0);
-                    Equipment::Table(Table::new(location, value, seats).with_id(id))
+                    Equipment::Table(Table::try_from((location.clone(), value, seats)).unwrap().with_id(id))
                 }
                 "Chair" => {
                     let chair_type = ChairType::try_from(extra_data.as_str())
                         .unwrap_or(ChairType::Annad);
-                    Equipment::Chair(Chair::new(location, value, chair_type).with_id(id))
+                    Equipment::Chair(Chair::try_from((location.clone(), value, chair_type)).unwrap().with_id(id))
                 }
                 "Projector" => {
                     let lumens = extra_data.parse::<u32>().unwrap_or(0);
-                    Equipment::Projector(Projector::new(location, value, lumens).with_id(id))
+                    Equipment::Projector(Projector::try_from((location.clone(), value, lumens)).unwrap().with_id(id))
                 }
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
@@ -296,16 +296,16 @@ impl Database {
             let equipment = match type_name.as_str() {
                 "Table" => {
                     let seats = extra_data.parse::<u8>().unwrap_or(0);
-                    Equipment::Table(Table::new(location, value, seats).with_id(id))
+                    Equipment::Table(Table::try_from((location.clone(), value, seats)).unwrap().with_id(id))
                 }
                 "Chair" => {
                     let chair_type = ChairType::try_from(extra_data.as_str())
                         .unwrap_or(ChairType::Annad);
-                    Equipment::Chair(Chair::new(location, value, chair_type).with_id(id))
+                    Equipment::Chair(Chair::try_from((location.clone(), value, chair_type)).unwrap().with_id(id))
                 }
                 "Projector" => {
                     let lumens = extra_data.parse::<u32>().unwrap_or(0);
-                    Equipment::Projector(Projector::new(location, value, lumens).with_id(id))
+                    Equipment::Projector(Projector::try_from((location.clone(), value, lumens)).unwrap().with_id(id))
                 }
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
@@ -344,16 +344,16 @@ impl Database {
             let equipment = match type_name.as_str() {
                 "Table" => {
                     let seats = extra_data.parse::<u8>().unwrap_or(0);
-                    Equipment::Table(Table::new(location, value, seats).with_id(id))
+                    Equipment::Table(Table::try_from((location.clone(), value, seats)).unwrap().with_id(id))
                 }
                 "Chair" => {
                     let chair_type = ChairType::try_from(extra_data.as_str())
                         .unwrap_or(ChairType::Annad);
-                    Equipment::Chair(Chair::new(location, value, chair_type).with_id(id))
+                    Equipment::Chair(Chair::try_from((location.clone(), value, chair_type)).unwrap().with_id(id))
                 }
                 "Projector" => {
                     let lumens = extra_data.parse::<u32>().unwrap_or(0);
-                    Equipment::Projector(Projector::new(location, value, lumens).with_id(id))
+                    Equipment::Projector(Projector::try_from((location.clone(), value, lumens)).unwrap().with_id(id))
                 }
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };

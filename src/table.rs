@@ -12,17 +12,22 @@ pub struct Table {
 
 impl Table {
     pub fn new(location: Location, value: u32, seats: u8) -> Self {
-        Table {
-            id: None,
-            location,
-            value,
-            seats,
-        }
+        Table { id: None, location, value, seats }
     }
 
     pub fn with_id(mut self, id: i64) -> Self {
         self.id = Some(id);
         self
+    }
+}
+
+impl TryFrom<(Location, u32, u8)> for Table {
+    type Error = String;
+
+    fn try_from(value: (Location, u32, u8)) -> Result<Self, Self::Error> {
+        let (location, value_isk, seats) = value;
+        if seats == 0 { return Err("Fjöldi sæta má ekki vera 0".into()); }
+        Ok(Table::new(location, value_isk, seats))
     }
 }
 

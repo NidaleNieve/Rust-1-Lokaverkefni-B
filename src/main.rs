@@ -265,24 +265,33 @@ impl EquipmentApp {
             }
         };
         
-        let location = Location::new(self.reg_building, self.reg_floor, self.reg_room);
+        let location = match Location::try_from((self.reg_building, self.reg_floor, self.reg_room)) {
+            Ok(loc) => loc,
+            Err(e) => { self.error_message = e; return; }
+        };
         
         let equipment = match self.reg_equipment_type {
             EquipmentType::Table => {
-                Equipment::Table(Table::new(location, value, self.reg_table_seats))
+                match Table::try_from((location, value, self.reg_table_seats)) {
+                    Ok(t) => Equipment::Table(t),
+                    Err(e) => { self.error_message = e; return; }
+                }
             }
             EquipmentType::Chair => {
-                Equipment::Chair(Chair::new(location, value, self.reg_chair_type))
+                match Chair::try_from((location, value, self.reg_chair_type)) {
+                    Ok(c) => Equipment::Chair(c),
+                    Err(e) => { self.error_message = e; return; }
+                }
             }
             EquipmentType::Projector => {
                 let lumens = match self.reg_projector_lumens.parse::<u32>() {
                     Ok(l) => l,
-                    Err(_) => {
-                        self.error_message = "Lumens verður að vera tala".to_string();
-                        return;
-                    }
+                    Err(_) => { self.error_message = "Lumens verður að vera tala".to_string(); return; }
                 };
-                Equipment::Projector(Projector::new(location, value, lumens))
+                match Projector::try_from((location, value, lumens)) {
+                    Ok(p) => Equipment::Projector(p),
+                    Err(e) => { self.error_message = e; return; }
+                }
             }
         };
         
@@ -445,7 +454,10 @@ impl EquipmentApp {
             }
         };
         
-        let location = Location::new(self.edit_building, self.edit_floor, self.edit_room);
+        let location = match Location::try_from((self.edit_building, self.edit_floor, self.edit_room)) {
+            Ok(loc) => loc,
+            Err(e) => { self.error_message = e; return; }
+        };
         
         let db = self.db.lock().unwrap();
         match db.update_location(id, &location) {

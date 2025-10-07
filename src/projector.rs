@@ -12,17 +12,22 @@ pub struct Projector {
 
 impl Projector {
     pub fn new(location: Location, value: u32, lumens: u32) -> Self {
-        Projector {
-            id: None,
-            location,
-            value,
-            lumens,
-        }
+        Projector { id: None, location, value, lumens }
     }
 
     pub fn with_id(mut self, id: i64) -> Self {
         self.id = Some(id);
         self
+    }
+}
+
+impl TryFrom<(Location, u32, u32)> for Projector {
+    type Error = String;
+
+    fn try_from(value: (Location, u32, u32)) -> Result<Self, Self::Error> {
+        let (location, value_isk, lumens) = value;
+        if lumens == 0 { return Err("Lúmens má ekki vera 0".into()); }
+        Ok(Projector::new(location, value_isk, lumens))
     }
 }
 

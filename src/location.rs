@@ -57,6 +57,28 @@ impl fmt::Display for Building {
     }
 }
 
+impl TryFrom<&str> for Building {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        // Accept both short codes and full Icelandic names
+        match value.trim() {
+            "HA" | "Hafnarfjörður" | "Hafnarfjordur" => Ok(Building::Hafnarfjordur),
+            "H" | "Háteigsvegur" | "Hateigssvegur" => Ok(Building::Hateigssvegur),
+            "S" | "Skólavörðuholt" | "Skolavorduhollt" => Ok(Building::Skolavorduhollt),
+            other => Err(format!("Óþekkt hús: {}", other)),
+        }
+    }
+}
+
+impl TryFrom<String> for Building {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Building::try_from(value.as_str())
+    }
+}
+
 impl Location {
     pub fn new(building: Building, floor: u8, room: u8) -> Self {
         Location {
@@ -118,5 +140,17 @@ impl TryFrom<String> for Location {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Location::try_from(value.as_str())
+    }
+}
+
+impl TryFrom<(Building, u8, u8)> for Location {
+    type Error = String;
+
+    fn try_from(value: (Building, u8, u8)) -> Result<Self, Self::Error> {
+        let (building, floor, room) = value;
+        if room > 99 {
+            return Err(format!("Herbergisnúmer má ekki vera hærra en 99: {}", room));
+        }
+        Ok(Location { building, floor, room })
     }
 }

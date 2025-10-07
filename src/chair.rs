@@ -13,17 +13,21 @@ pub struct Chair {
 
 impl Chair {
     pub fn new(location: Location, value: u32, chair_type: ChairType) -> Self {
-        Chair {
-            id: None,
-            location,
-            value,
-            chair_type,
-        }
+        Chair { id: None, location, value, chair_type }
     }
 
     pub fn with_id(mut self, id: i64) -> Self {
         self.id = Some(id);
         self
+    }
+}
+
+impl TryFrom<(Location, u32, ChairType)> for Chair {
+    type Error = String;
+
+    fn try_from(value: (Location, u32, ChairType)) -> Result<Self, Self::Error> {
+        let (location, value_isk, chair_type) = value;
+        Ok(Chair::new(location, value_isk, chair_type))
     }
 }
 
