@@ -12,6 +12,18 @@
     }
   },
   {
+    "Projector": {
+      "id": 7,
+      "location": {
+        "building": "Hateigssvegur",
+        "floor": 3,
+        "room": 68
+      },
+      "value": 5600,
+      "lumens": 4000
+    }
+  },
+  {
     "Table": {
       "id": 5,
       "location": {
@@ -37,7 +49,43 @@
   },
   {
     "Table": {
+      "id": 8,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 1,
+        "room": 1
+      },
+      "value": 123123,
+      "seats": 4
+    }
+  },
+  {
+    "Table": {
+      "id": 9,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 1,
+        "room": 1
+      },
+      "value": 123123,
+      "seats": 4
+    }
+  },
+  {
+    "Table": {
       "id": 1,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 3,
+        "room": 35
+      },
+      "value": 57189,
+      "seats": 10
+    }
+  },
+  {
+    "Table": {
+      "id": 10,
       "location": {
         "building": "Hafnarfjordur",
         "floor": 3,
@@ -61,7 +109,31 @@
   },
   {
     "Chair": {
+      "id": 11,
+      "location": {
+        "building": "Hafnarfjordur",
+        "floor": 3,
+        "room": 68
+      },
+      "value": 9123,
+      "chair_type": "Annad"
+    }
+  },
+  {
+    "Chair": {
       "id": 4,
+      "location": {
+        "building": "Skolavorduhollt",
+        "floor": 3,
+        "room": 53
+      },
+      "value": 55555,
+      "chair_type": "Skolastoll"
+    }
+  },
+  {
+    "Chair": {
+      "id": 12,
       "location": {
         "building": "Skolavorduhollt",
         "floor": 3,

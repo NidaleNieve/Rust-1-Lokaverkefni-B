@@ -12,6 +12,7 @@ use database::Database;
 use eframe::egui;
 use eframe::egui::{IconData, TextureHandle};
 use eframe::epaint::ColorImage;
+use rfd::FileDialog;
 use equipment::Equipment;
 use location::{Building, Location};
 use projector::Projector;
@@ -128,6 +129,8 @@ struct EquipmentApp {
     
     // Statistics
     show_stats: bool,
+    // Sidebar toggle
+    show_sidebar: bool,
 }
 
 impl EquipmentApp {
@@ -166,6 +169,7 @@ impl EquipmentApp {
             message: String::new(),
             error_message: String::new(),
             show_stats: false,
+            show_sidebar: false,
         }
     }
     
@@ -511,7 +515,7 @@ impl EquipmentApp {
     }
     
     fn search_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("� Leita að búnaði");
+        ui.heading("🔍 Leita að búnaði");
         ui.separator();
         
         ui.horizontal(|ui| {
@@ -596,7 +600,7 @@ impl EquipmentApp {
     }
     
     fn print_section(&mut self, ui: &mut egui::Ui) {
-        ui.heading("�️ Prenta búnað");
+        ui.heading("📋 Prenta búnað");
         ui.separator();
         
         // Statistics toggle
@@ -984,52 +988,42 @@ impl EquipmentApp {
     fn save_to_json(&mut self) {
         self.error_message.clear();
         self.message.clear();
-        
+        let path = FileDialog::new().set_file_name("equipment.json").add_filter("JSON", &["json"]).save_file();
+        if path.is_none() { return; }
+        let path = path.unwrap();
         let db = self.db.lock().unwrap();
         match db.get_all_equipment() {
             Ok(equipment) => {
                 let json = serde_json::to_string_pretty(&equipment).unwrap();
-                match std::fs::write("equipment.json", json) {
-                    Ok(_) => {
-                        self.message = "✅ Gögn vistuð í equipment.json".to_string();
-                    }
-                    Err(e) => {
-                        self.error_message = format!("❌ Villa við vistun: {}", e);
-                    }
+                match std::fs::write(&path, json) {
+                    Ok(_) => { self.message = format!("✅ Gögn vistuð í {}", path.display()); }
+                    Err(e) => { self.error_message = format!("❌ Villa við vistun: {}", e); }
                 }
             }
-            Err(e) => {
-                self.error_message = format!("❌ Villa við lestur úr gagnagrunni: {}", e);
-            }
+            Err(e) => { self.error_message = format!("❌ Villa við lestur úr gagnagrunni: {}", e); }
         }
     }
     
     fn load_from_json(&mut self) {
         self.error_message.clear();
         self.message.clear();
-        
-        match std::fs::read_to_string("equipment.json") {
-            Ok(json) => {
-                match serde_json::from_str::<Vec<Equipment>>(&json) {
-                    Ok(equipment) => {
-                        let db = self.db.lock().unwrap();
-                        let mut count = 0;
-                        for mut eq in equipment {
-                            eq.set_id(0); // Reset ID for auto-increment
-                            if db.insert_equipment(&eq).is_ok() {
-                                count += 1;
-                            }
-                        }
-                        self.message = format!("✅ {} búnaður hlaðinn úr JSON", count);
+        let path = FileDialog::new().add_filter("JSON", &["json"]).pick_file();
+        if path.is_none() { return; }
+        let path = path.unwrap();
+        match std::fs::read_to_string(&path) {
+            Ok(json) => match serde_json::from_str::<Vec<Equipment>>(&json) {
+                Ok(equipment) => {
+                    let db = self.db.lock().unwrap();
+                    let mut count = 0;
+                    for mut eq in equipment {
+                        eq.set_id(0);
+                        if db.insert_equipment(&eq).is_ok() { count += 1; }
                     }
-                    Err(e) => {
-                        self.error_message = format!("❌ Villa við að lesa JSON: {}", e);
-                    }
+                    self.message = format!("✅ {} búnaður hlaðinn úr {}", count, path.display());
                 }
-            }
-            Err(e) => {
-                self.error_message = format!("❌ Villa við að opna skrá: {}", e);
-            }
+                Err(e) => { self.error_message = format!("❌ Villa við að lesa JSON: {}", e); }
+            },
+            Err(e) => { self.error_message = format!("❌ Villa við að opna skrá: {}", e); }
         }
     }
 }
@@ -1067,6 +1061,26 @@ impl eframe::App for EquipmentApp {
         style.visuals.widgets.hovered.expansion = 2.0;
         
         ctx.set_style(style);
+
+        // Dark header with white main title and sidebar toggle
+        egui::TopBottomPanel::top("app_header").frame(egui::Frame::none()).show(ctx, |ui| {
+            let header_bg = egui::Color32::from_rgb(10, 56, 113);
+            let rect = ui.max_rect();
+            ui.painter().rect_filled(rect, 0.0, header_bg);
+            ui.horizontal(|ui| {
+                if let Some(icon) = &self.app_icon_tex {
+                    let desired = egui::Vec2 { x: 28.0, y: 28.0 };
+                    ui.image((icon.id(), desired));
+                }
+                ui.add_space(6.0);
+                ui.heading(egui::RichText::new("Búnaðaristi Tækniskólans").color(egui::Color32::WHITE).size(24.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let btn = egui::Button::new(egui::RichText::new(if self.show_sidebar { "↔︎ Fela yfirlit" } else { "📋 Sýna yfirlit" }).color(egui::Color32::WHITE));
+                    if ui.add(btn).clicked() { self.show_sidebar = !self.show_sidebar; }
+                });
+            });
+            ui.add_space(6.0);
+        });
         
         // Lazily load app icon texture for rendering inside the app
         if self.app_icon_tex.is_none() {
@@ -1080,6 +1094,41 @@ impl eframe::App for EquipmentApp {
                     self.app_icon_tex = Some(tex);
                 }
             }
+        }
+
+        // Right sidebar mirrors "Prenta -> Allur búnaður" view
+        if self.show_sidebar {
+            egui::SidePanel::right("right_sidebar").resizable(true).default_width(420.0).show(ctx, |ui| {
+                if self.displayed_equipment.is_empty() || !matches!(self.display_filter, DisplayFilter::All) {
+                    self.display_filter = DisplayFilter::All;
+                    self.load_equipment();
+                }
+                ui.heading("📋 Allur búnaður");
+                ui.add_space(6.0);
+                ui.label(format!("Fjöldi: {}", self.displayed_equipment.len()));
+                ui.add_space(6.0);
+                let show_desc = ui.available_width() > 560.0;
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::Grid::new("sidebar_equipment_grid").striped(true).spacing([10.0, 8.0]).show(ui, |ui| {
+                        if ui.button("ID ▲▼").clicked() { self.toggle_sort(SortColumn::Id); }
+                        if ui.button("Tegund ▲▼").clicked() { self.toggle_sort(SortColumn::Type); }
+                        if ui.button("Staðsetning ▲▼").clicked() { self.toggle_sort(SortColumn::Location); }
+                        if ui.button("Verðmæti ▲▼").clicked() { self.toggle_sort(SortColumn::Value); }
+                        if show_desc { ui.label("Lýsing"); }
+                        ui.end_row();
+                        for equipment in &self.displayed_equipment {
+                            ui.label(equipment.get_id().unwrap_or(0).to_string());
+                            ui.label(equipment.get_type_name());
+                            let location_str = match equipment { Equipment::Table(t) => format!("{}", t.location), Equipment::Chair(c) => format!("{}", c.location), Equipment::Projector(p) => format!("{}", p.location) };
+                            ui.label(location_str);
+                            let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
+                            ui.label(format!("{} kr.", value));
+                            if show_desc { ui.label(format!("{}", equipment)); }
+                            ui.end_row();
+                        }
+                    });
+                });
+            });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1127,7 +1176,7 @@ impl eframe::App for EquipmentApp {
                 
                 let search_btn = ui.selectable_label(
                     self.current_section == AppSection::Search,
-                    egui::RichText::new("� Leita").size(16.0)
+                    egui::RichText::new("🔍 Leita").size(16.0)
                 );
                 if search_btn.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1138,7 +1187,7 @@ impl eframe::App for EquipmentApp {
                 
                 let print_btn = ui.selectable_label(
                     self.current_section == AppSection::Print,
-                    egui::RichText::new("�️ Prenta").size(16.0)
+                    egui::RichText::new("📋 Prenta").size(16.0)
                 );
                 if print_btn.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1175,6 +1224,13 @@ impl eframe::App for EquipmentApp {
                 AppSection::Search => self.search_section(ui),
                 AppSection::Print => self.print_section(ui),
             }
+        });
+
+        // Persistent footer with author and year
+        egui::TopBottomPanel::bottom("app_footer").show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Daníel Snær Rodríguez, 2025").strong());
+            });
         });
     }
 }
