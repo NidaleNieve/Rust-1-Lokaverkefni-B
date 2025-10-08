@@ -1,8 +1,8 @@
 # Rust - Lokaverkefni B
-## Daníel Snær Rodríguez
-# Búnaðarlisti Tækniskólans
+### Daníel Snær Rodríguez
 
-### Hugbúnaður til að halda utan um búnað Tækniskólans í Rust með myndrænu notendaviðmóti.
+## Búnaðarlisti Tækniskólans
+#### Hugbúnaður til að halda utan um búnað Tækniskólans í Rust með myndrænu notendaviðmóti.
 
 ## Hvernig á að keyra forritið
 
