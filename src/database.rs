@@ -71,6 +71,42 @@ impl Database {
         Ok(self.conn.last_insert_rowid())
     }
 
+    pub fn insert_equipment_with_id(&self, id: i64, equipment: &Equipment) -> Result<()> {
+        let (type_name, building, floor, room, value, extra_data) = match equipment {
+            Equipment::Table(t) => (
+                "Table",
+                t.location.building.to_code(),
+                t.location.floor,
+                t.location.room,
+                t.value,
+                t.seats.to_string(),
+            ),
+            Equipment::Chair(c) => (
+                "Chair",
+                c.location.building.to_code(),
+                c.location.floor,
+                c.location.room,
+                c.value,
+                format!("{}", c.chair_type),
+            ),
+            Equipment::Projector(p) => (
+                "Projector",
+                p.location.building.to_code(),
+                p.location.floor,
+                p.location.room,
+                p.value,
+                p.lumens.to_string(),
+            ),
+        };
+
+        self.conn.execute(
+            "INSERT INTO equipment (id, type, building, floor, room, value, extra_data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, type_name, building, floor, room, value, extra_data],
+        )?;
+        Ok(())
+    }
+
     pub fn get_all_equipment(&self) -> Result<Vec<Equipment>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, type, building, floor, room, value, extra_data 
@@ -179,6 +215,20 @@ impl Database {
 
     pub fn clear_all_equipment(&self) -> Result<()> {
         self.conn.execute("DELETE FROM equipment", [])?;
+        Ok(())
+    }
+
+    pub fn reset_equipment_autoincrement(&self, max_id: i64) -> Result<()> {
+        // Try updating existing sequence; if none exists, insert a new row
+        let updated = self
+            .conn
+            .execute("UPDATE sqlite_sequence SET seq = ?1 WHERE name = 'equipment'", params![max_id])?;
+        if updated == 0 {
+            // sqlite_sequence row doesn't exist yet for this table
+            let _ = self
+                .conn
+                .execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('equipment', ?1)", params![max_id])?;
+        }
         Ok(())
     }
 

@@ -106,6 +106,7 @@ struct EquipmentApp {
     // Search fields
     search_query: String,
     search_results: Vec<Equipment>,
+    search_selected_index: Option<usize>,
     
     // Display fields
     display_filter: DisplayFilter,
@@ -156,6 +157,7 @@ impl EquipmentApp {
             edit_room: 1,
             search_query: String::new(),
             search_results: Vec::new(),
+            search_selected_index: None,
             display_filter: DisplayFilter::All,
             display_building: Building::Hafnarfjordur,
             display_type: EquipmentType::Table,
@@ -517,56 +519,68 @@ impl EquipmentApp {
     fn search_section(&mut self, ui: &mut egui::Ui) {
         ui.heading("🔍 Leita að búnaði");
         ui.separator();
-        
+
+        // Live search input
         ui.horizontal(|ui| {
             ui.label("Leit:");
-            ui.text_edit_singleline(&mut self.search_query);
-            if ui.button("🔍 Leita").clicked() {
+            let changed = ui.text_edit_singleline(&mut self.search_query).changed();
+            if changed {
                 self.perform_search();
             }
         });
-        
         ui.add_space(10.0);
-        
-        // Display search results
+
+        // If exactly one result, auto-select it
+        if self.search_results.len() == 1 {
+            self.search_selected_index = Some(0);
+        } else if self.search_results.is_empty() {
+            self.search_selected_index = None;
+        }
+
+        // Results and selector (multi-select via radio-like list)
         if !self.search_results.is_empty() {
             ui.separator();
             ui.label(format!("Fjöldi niðurstaðna: {} atriði", self.search_results.len()));
             ui.add_space(10.0);
-            
+
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui::Grid::new("search_results_grid")
                     .striped(true)
                     .spacing([10.0, 8.0])
                     .show(ui, |ui| {
-                        // Header
+                        ui.label("Velja");
                         ui.label("ID");
                         ui.label("Tegund");
                         ui.label("Staðsetning");
                         ui.label("Verðmæti");
                         ui.label("Lýsing");
                         ui.end_row();
-                        
-                        // Data rows
-                        for equipment in &self.search_results {
+
+                        for (i, equipment) in self.search_results.iter().enumerate() {
                             let id = equipment.get_id().unwrap_or(0);
+                            let selected = self.search_selected_index == Some(i);
+                            let mut select_state = selected;
+                            ui.checkbox(&mut select_state, "");
+                            if select_state && !selected {
+                                self.search_selected_index = Some(i);
+                            } else if !select_state && selected {
+                                self.search_selected_index = None;
+                            }
+
                             ui.label(id.to_string());
                             ui.label(equipment.get_type_name());
-                            
                             let location_str = match equipment {
                                 Equipment::Table(t) => format!("{}", t.location),
                                 Equipment::Chair(c) => format!("{}", c.location),
                                 Equipment::Projector(p) => format!("{}", p.location),
                             };
                             ui.label(location_str);
-                            
                             let value = match equipment {
                                 Equipment::Table(t) => t.value,
                                 Equipment::Chair(c) => c.value,
                                 Equipment::Projector(p) => p.value,
                             };
                             ui.label(format!("{} kr.", value));
-                            
                             ui.label(format!("{}", equipment));
                             ui.end_row();
                         }
@@ -579,17 +593,32 @@ impl EquipmentApp {
     
     fn perform_search(&mut self) {
         self.error_message.clear();
-        
         let db = self.db.lock().unwrap();
         match db.get_all_equipment() {
             Ok(all_equipment) => {
-                let query_lower = self.search_query.to_lowercase();
+                let q = self.search_query.to_lowercase();
                 self.search_results = all_equipment
                     .into_iter()
                     .filter(|eq| {
-                        let equipment_str = format!("{}", eq).to_lowercase();
-                        equipment_str.contains(&query_lower) || 
-                        eq.get_id().unwrap_or(0).to_string().contains(&query_lower)
+                        // Search across multiple columns
+                        let id_match = eq.get_id().unwrap_or(0).to_string().contains(&q);
+                        let type_match = eq.get_type_name().to_lowercase().contains(&q);
+                        let location_match = match eq {
+                            Equipment::Table(t) => format!("{}", t.location),
+                            Equipment::Chair(c) => format!("{}", c.location),
+                            Equipment::Projector(p) => format!("{}", p.location),
+                        }
+                        .to_lowercase()
+                        .contains(&q);
+                        let value_match = match eq {
+                            Equipment::Table(t) => t.value,
+                            Equipment::Chair(c) => c.value,
+                            Equipment::Projector(p) => p.value,
+                        }
+                        .to_string()
+                        .contains(&q);
+                        let desc_match = format!("{}", eq).to_lowercase().contains(&q);
+                        id_match || type_match || location_match || value_match || desc_match
                     })
                     .collect();
             }
@@ -1024,7 +1053,9 @@ impl EquipmentApp {
         let path = path.unwrap();
         match std::fs::read_to_string(&path) {
             Ok(json) => match serde_json::from_str::<Vec<Equipment>>(&json) {
-                Ok(equipment) => {
+                Ok(mut equipment) => {
+                    // If JSON contains IDs, preserve them and reset AUTOINCREMENT accordingly.
+                    let max_id = equipment.iter().filter_map(|e| e.get_id()).max().unwrap_or(0);
                     let mut inserted = 0;
                     {
                         let db = self.db.lock().unwrap();
@@ -1032,15 +1063,22 @@ impl EquipmentApp {
                             self.error_message = format!("❌ Tókst ekki að tæma gagnagrunn: {}", e);
                             return;
                         }
-                        for mut eq in equipment {
-                            eq.set_id(0);
-                            if db.insert_equipment(&eq).is_ok() { inserted += 1; }
+                        for eq in equipment.drain(..) {
+                            if let Some(id) = eq.get_id() {
+                                let _ = db.insert_equipment_with_id(id, &eq);
+                                inserted += 1;
+                            } else {
+                                if db.insert_equipment(&eq).is_ok() { inserted += 1; }
+                            }
+                        }
+                        if let Err(e) = db.reset_equipment_autoincrement(max_id as i64) {
+                            self.error_message = format!("⚠️ Gat ekki stillt id-runu: {}", e);
                         }
                     }
 
                     self.displayed_equipment.clear();
                     self.search_results.clear();
-                    self.sort_column = None;
+                    self.sort_column = None; // default
                     self.load_equipment();
                     self.message = format!("✅ {} búnaður hlaðinn úr {}", inserted, path.display());
                 }
@@ -1099,7 +1137,10 @@ impl eframe::App for EquipmentApp {
                     ui.image((icon.id(), desired));
                 }
                 ui.add_space(6.0);
-                ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans").color(egui::Color32::WHITE).size(24.0));
+                ui.vertical(|ui| {
+                    ui.add_space(2.0); // top margin for header text
+                    ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans").color(egui::Color32::WHITE).size(24.0));
+                });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     let btn = egui::Button::new(egui::RichText::new(if self.show_sidebar { "↔︎ Fela lista" } else { "📋 Sjá lista" }).color(egui::Color32::WHITE));
@@ -1321,9 +1362,12 @@ impl eframe::App for EquipmentApp {
 
         // Persistent footer with author and year
         egui::TopBottomPanel::bottom("app_footer").show(ctx, |ui| {
+            ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
+                ui.add_space(8.0);
                 ui.label(egui::RichText::new("Daníel Snær Rodríguez, 2025").strong());
             });
+            ui.add_space(2.0);
         });
     }
 }
