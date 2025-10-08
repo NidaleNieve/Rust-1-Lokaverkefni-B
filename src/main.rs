@@ -539,6 +539,9 @@ impl EquipmentApp {
         ui.heading("🔍 Leita að búnaði");
         ui.separator();
 
+        // Always refresh search like the sidebar does
+        self.perform_search();
+
         // Live search input
         ui.horizontal(|ui| {
             ui.label("Leit:");
@@ -601,7 +604,7 @@ impl EquipmentApp {
 
             egui::ScrollArea::vertical().show(ui, |ui| {
                 use egui_extras::{TableBuilder, Column};
-                let mut table = TableBuilder::new(ui)
+                let table = TableBuilder::new(ui)
                     .striped(true)
                     .resizable(true)
                     .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -628,17 +631,18 @@ impl EquipmentApp {
                         header.col(|ui| { ui.label("Lýsing"); });
                     })
                     .body(|mut body| {
+                        let row_h = 22.0;
                         for (i, equipment) in data.iter().enumerate() {
                             let id = equipment.get_id().unwrap_or(0);
                             let location_str = match equipment { Equipment::Table(t) => format!("{}", t.location), Equipment::Chair(c) => format!("{}", c.location), Equipment::Projector(p) => format!("{}", p.location) };
                             let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
-                            body.row(20.0, |mut row| {
+                            body.row(row_h, |mut row| {
                                 let mut clicked_any = false;
-                                row.col(|ui| { if ui.add(egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add(egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add(egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add(egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add(egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
 
                                 if clicked_any {
                                     self.search_selected_index = Some(i);
@@ -696,6 +700,9 @@ impl EquipmentApp {
     fn print_section(&mut self, ui: &mut egui::Ui) {
         ui.heading("📋 Prenta búnað");
         ui.separator();
+
+        // Always reload equipment like the sidebar does so the list stays fresh
+        self.load_equipment();
         
         // Statistics toggle
         ui.horizontal(|ui| {
@@ -1412,16 +1419,17 @@ impl eframe::App for EquipmentApp {
             }
         });
 
-        // Persistent footer with author and year, improved margins
+        // Persistent footer with author and year, improved contrast and margins
         egui::TopBottomPanel::bottom("app_footer")
             .frame(
                 egui::Frame::default()
-                    .fill(egui::Color32::from_rgb(240, 248, 255))
+                    .fill(egui::Color32::from_rgb(60, 100, 140))
                     .inner_margin(egui::Margin::symmetric(16.0, 8.0))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(180)))
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Daníel Snær Rodríguez, 2025").strong());
+                    ui.label(egui::RichText::new("Daníel Snær Rodríguez, 2025").color(egui::Color32::WHITE).strong());
                 });
             });
     }
