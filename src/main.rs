@@ -1144,7 +1144,7 @@ impl EquipmentApp {
                     ui.separator();
                     ui.end_row();
                     
-                    ui.label("🪑 Borð:");
+                    ui.label("■ Borð:");
                     ui.label(format!("{} ({:.1}%)", table_count, (table_count as f32 / total_count as f32) * 100.0));
                     ui.end_row();
                     
@@ -1152,7 +1152,7 @@ impl EquipmentApp {
                     ui.label(format!("{} ({:.1}%)", chair_count, (chair_count as f32 / total_count as f32) * 100.0));
                     ui.end_row();
                     
-                    ui.label("📽️ Skjávarpar:");
+                    ui.label("📽 Skjávarpar");
                     ui.label(format!("{} ({:.1}%)", projector_count, (projector_count as f32 / total_count as f32) * 100.0));
                     ui.end_row();
                     
