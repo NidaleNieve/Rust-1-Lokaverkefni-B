@@ -2,6 +2,7 @@
 name = "CLAUDE-Lokaverkefni-B"
 version = "0.1.0"
 edition = "2021"
+authors = ["Daníel Snær Rodríguez <danielsnaerr@gmail.com>"]
 
 [dependencies]
 eframe = "0.28"

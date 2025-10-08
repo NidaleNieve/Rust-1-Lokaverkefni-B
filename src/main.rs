@@ -830,10 +830,10 @@ impl EquipmentApp {
 
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button("🖨️ Prenta lista").clicked() {
+            if ui.button("📄 Prenta lista").clicked() {
                 self.print_current_list();
             }
-            if ui.button("🧾 Flytja út í PDF").clicked() {
+            if ui.button("💾 Flytja út í PDF").clicked() {
                 self.export_current_list_pdf();
             }
         });
