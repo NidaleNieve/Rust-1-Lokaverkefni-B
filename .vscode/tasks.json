@@ -99,6 +99,72 @@
 				"$rustc"
 			],
 			"group": "build"
+		},
+		{
+			"label": "Run app",
+			"type": "shell",
+			"command": "cargo run",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build app",
+			"type": "shell",
+			"command": "cargo build",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build app (retry)",
+			"type": "shell",
+			"command": "cargo build",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build app (fix helpers)",
+			"type": "shell",
+			"command": "cargo build",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build app again",
+			"type": "shell",
+			"command": "cargo build",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
+		},
+		{
+			"label": "Build app (finalize)",
+			"type": "shell",
+			"command": "cargo build",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": "build"
 		}
 	]
 }

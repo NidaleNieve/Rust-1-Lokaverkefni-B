@@ -151,6 +151,38 @@ struct EquipmentApp {
 }
 
 impl EquipmentApp {
+    // Normalize input for fuzzy comparisons (lowercase and map Icelandic accents)
+    fn norm(s: &str) -> String {
+        let lower = s.trim().to_lowercase();
+        lower
+            .replace('á', "a").replace('é', "e").replace('í', "i").replace('ó', "o")
+            .replace('ú', "u").replace('ý', "y").replace('ð', "d").replace('þ', "th")
+            .replace('æ', "ae").replace('ö', "o")
+    }
+
+    fn has_token_like(tokens: &[&str], words: &[&str], max_dist: usize) -> bool {
+        for &t in tokens {
+            let tn = Self::norm(t);
+            for &w in words {
+                if Self::levenshtein(&tn, &Self::norm(w)) <= max_dist { return true; }
+            }
+        }
+        false
+    }
+
+    fn find_number<'a>(tokens: &'a [&'a str]) -> Option<&'a str> {
+        tokens.iter().copied().find(|t| t.chars().all(|c| c.is_ascii_digit()))
+    }
+
+    fn find_location_code(tokens: &[&str]) -> Option<String> {
+        for &t in tokens {
+            let try_vals = [t.to_string(), t.to_uppercase()];
+            for val in try_vals {
+                if Location::try_from(val.as_str()).is_ok() { return Some(val); }
+            }
+        }
+        None
+    }
     // Very small Levenshtein implementation for fuzzy matching (O(n*m), fine for tiny inputs)
     fn levenshtein(a: &str, b: &str) -> usize {
         let a_bytes = a.as_bytes();
@@ -196,112 +228,81 @@ impl EquipmentApp {
 
     // Parse and execute palette command; return true if the palette should close
     fn run_palette_command(&mut self, cmd: &str) -> bool {
-        // ...existing methods...
-        let c = cmd.trim();
-        if c.is_empty() { return false; }
-        let lower = c.to_lowercase();
+        let original = cmd.trim();
+        if original.is_empty() { return false; }
+        let lower = Self::norm(original);
+        let tokens: Vec<&str> = lower.split_whitespace().collect();
 
-        // Quick help
-        if lower == "hjálp" || lower == "help" {
-            self.message = "Dæmi: 'sækja 12', 'eyða 12', 'skrá HA-101', 'uppfæra 12 í HA-101', 'leita stóll'".into();
+        // Help
+        if Self::has_token_like(&tokens, &["hjálp", "help", "?"], 1) {
+            self.message = "Dæmi: 'sækja 12', 'eyða 12', 'skrá HA-101', 'uppfæra 12 í HA-101', 'leita stóll', 'raða tegund', 'opna lista'".into();
             return true;
         }
 
-        // Navigation
-        if lower.starts_with("fara í ") {
-            let rest = lower[7..].trim();
-            match rest {
-                "skrá" => { self.current_section = AppSection::Register; return true; },
-                "breyta" => { self.current_section = AppSection::Edit; return true; },
-                "leita" => { self.current_section = AppSection::Search; return true; },
-                "prenta" => { self.current_section = AppSection::Print; return true; },
-                _ => { self.error_message = format!("Óþekkt leið: {}", rest); return false; }
+        // Navigation (accept diacritics-agnostic via norm)
+        if lower.starts_with("fara i ") || Self::has_token_like(&tokens, &["skrá", "skra", "breyta", "leita", "prenta", "register", "edit", "search", "print"], 1) {
+            let dest_s = lower.replace("fara i", "");
+            let dest = dest_s.trim();
+            if dest.contains("skra") || dest.contains("register") { self.current_section = AppSection::Register; return true; }
+            if dest.contains("breyta") || dest.contains("edit") { self.current_section = AppSection::Edit; return true; }
+            if dest.contains("leita") || dest.contains("search") { self.current_section = AppSection::Search; return true; }
+            if dest.contains("prenta") || dest.contains("print") { self.current_section = AppSection::Print; return true; }
+        }
+
+        // Sidebar and stats toggles
+        if Self::has_token_like(&tokens, &["opna", "sýna", "show"], 1) && Self::has_token_like(&tokens, &["lista", "listann", "list", "sidebar"], 1) { self.show_sidebar = true; return true; }
+        if Self::has_token_like(&tokens, &["fela", "felja", "hide", "loka"], 1) && Self::has_token_like(&tokens, &["lista", "listann", "list", "sidebar"], 1) { self.show_sidebar = false; return true; }
+        if Self::has_token_like(&tokens, &["sýna", "show"], 1) && Self::has_token_like(&tokens, &["tölfræði", "tolfraedi", "stats"], 2) { self.show_stats = true; return true; }
+        if Self::has_token_like(&tokens, &["fela", "hide"], 1) && Self::has_token_like(&tokens, &["tölfræði", "tolfraedi", "stats"], 2) { self.show_stats = false; return true; }
+
+        // Print/PDF and JSON
+        if Self::has_token_like(&tokens, &["prenta", "prent", "print"], 1) { self.print_current_list(); return true; }
+        if Self::has_token_like(&tokens, &["pdf", "export"], 1) { self.export_current_list_pdf(); return true; }
+        if Self::has_token_like(&tokens, &["vista", "save", "export"], 1) && Self::has_token_like(&tokens, &["json"], 0) { self.save_to_json(); return true; }
+        if Self::has_token_like(&tokens, &["hlaða", "hlada", "load", "import"], 2) && Self::has_token_like(&tokens, &["json"], 0) { self.load_from_json(); return true; }
+
+        // Sorting
+        if Self::has_token_like(&tokens, &["raða", "rada", "sort"], 1) {
+            let mut col: Option<SortColumn> = None;
+            if Self::has_token_like(&tokens, &["id", "auðkenni", "aukenni"], 2) { col = Some(SortColumn::Id); }
+            else if Self::has_token_like(&tokens, &["tegund", "type"], 1) { col = Some(SortColumn::Type); }
+            else if Self::has_token_like(&tokens, &["staðsetning", "stadsetning", "location"], 2) { col = Some(SortColumn::Location); }
+            else if Self::has_token_like(&tokens, &["verðmæti", "verdmæti", "verdmaeti", "value", "price"], 3) { col = Some(SortColumn::Value); }
+            let mut ord = self.sort_order;
+            if Self::has_token_like(&tokens, &["hækkandi", "haekkandi", "asc", "upp"], 2) { ord = SortOrder::Ascending; }
+            if Self::has_token_like(&tokens, &["lækkandi", "laekkandi", "desc", "niður", "nidur"], 2) { ord = SortOrder::Descending; }
+            if Self::has_token_like(&tokens, &["endurstilla", "reset"], 1) { self.sort_column = None; return true; }
+            if let Some(c) = col { self.sort_column = Some(c); self.sort_order = ord; return true; }
+        }
+
+        // Fetch/Open/Edit by id
+        if Self::has_token_like(&tokens, &["sækja", "saekja", "opna", "open", "edit", "breyta", "fa", "fetch"], 2) {
+            if let Some(id) = Self::find_number(&tokens) {
+                self.edit_id = id.to_string();
+                self.fetch_equipment_for_edit();
+                self.current_section = AppSection::Edit;
+                return true;
             }
         }
 
-        // Toggle sidebar
-        if lower == "opna lista" { self.show_sidebar = true; return true; }
-        if lower == "fela lista" { self.show_sidebar = false; return true; }
-
-        // Print / PDF
-        if lower == "prenta" { self.print_current_list(); return true; }
-        if lower == "pdf" || lower == "flytja út pdf" { self.export_current_list_pdf(); return true; }
-
-        // JSON
-        if lower == "vista json" { self.save_to_json(); return true; }
-        if lower == "hlaða json" { self.load_from_json(); return true; }
-
-        // Tutorial commands removed
-
-        // sækja <id>
-        if lower.starts_with("sækja ") {
-            if let Some(id_str) = lower.split_whitespace().nth(1) {
-                if id_str.chars().all(|c| c.is_ascii_digit()) {
-                    self.edit_id = id_str.to_string();
-                    self.fetch_equipment_for_edit();
-                    self.current_section = AppSection::Edit;
-                    return true;
-                }
-            }
-            self.error_message = "Notkun: sækja <id>".into();
-            return false;
-        }
-
-        // eyða <id>
-        if lower.starts_with("eyða ") || lower.starts_with("eyda ") {
-            let id_str = lower.split_whitespace().nth(1).unwrap_or("");
-            if id_str.chars().all(|c| c.is_ascii_digit()) {
-                self.edit_id = id_str.to_string();
+        // Delete by id
+        if Self::has_token_like(&tokens, &["eyða", "eyda", "delete", "remove", "rm"], 2) {
+            if let Some(id) = Self::find_number(&tokens) {
+                self.edit_id = id.to_string();
                 self.fetch_equipment_for_edit();
                 self.delete_equipment();
                 return true;
             }
-            self.error_message = "Notkun: eyða <id>".into();
-            return false;
         }
 
-        // leita <text>
-        if lower.starts_with("leita ") {
-            let q = c[6..].trim();
-            self.search_query = q.to_string();
-            self.perform_search();
-            self.current_section = AppSection::Search;
-            return true;
-        }
-
-        // skrá <code>  where code is like HA-101 or S-569 -> S 5th floor room 69
-        if lower.starts_with("skrá ") || lower.starts_with("skra ") {
-            let code = c.split_whitespace().nth(1).unwrap_or("");
-            if let Ok(loc) = Location::try_from(code) {
-                self.current_section = AppSection::Register;
-                self.reg_building = loc.building;
-                self.reg_floor = loc.floor;
-                self.reg_room = loc.room;
-                return true;
-            } else {
-                self.error_message = "Notkun: skrá <HA|H|S>-<hæð><stofa> t.d. S-569".into();
-                return false;
-            }
-        }
-
-        // uppfæra <id> í <code>
-        if lower.starts_with("uppfæra ") || lower.starts_with("uppfaera ") {
-            let parts: Vec<&str> = lower.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let id_str = parts[1];
-                // Find the location code after 'í' or 'i'
-                let mut code_opt: Option<&str> = None;
-                for w in parts.iter().skip(2) {
-                    if *w == "í" || *w == "i" { continue; }
-                    code_opt = Some(*w);
-                    break;
-                }
-                if let (true, Some(code)) = (id_str.chars().all(|c| c.is_ascii_digit()), code_opt) {
-                    if let Ok(loc) = Location::try_from(code) {
+        // Update location by id
+        if Self::has_token_like(&tokens, &["uppfæra", "uppfaera", "update", "setja", "move"], 2) {
+            if let Some(id) = Self::find_number(&tokens) {
+                if let Some(code) = Self::find_location_code(&tokens) {
+                    if let Ok(loc) = Location::try_from(code.as_str()) {
                         self.current_section = AppSection::Edit;
-                        self.edit_id = id_str.to_string();
+                        self.edit_id = id.to_string();
                         self.fetch_equipment_for_edit();
-                        // Apply update
                         self.edit_building = loc.building;
                         self.edit_floor = loc.floor;
                         self.edit_room = loc.room;
@@ -310,19 +311,39 @@ impl EquipmentApp {
                     }
                 }
             }
-            self.error_message = "Notkun: uppfæra <id> í <HA|H|S>-<hæð><stofa>".into();
-            return false;
         }
 
-        // direct section keywords
-        match lower.as_str() {
-            "skrá" | "skra" => { self.current_section = AppSection::Register; true },
-            "breyta" => { self.current_section = AppSection::Edit; true },
-            "leita" => { self.current_section = AppSection::Search; true },
-            "prenta" => { self.current_section = AppSection::Print; true },
-            _ => { self.error_message = format!("Óþekkt skipun: {}", c); false }
+        // Prefill register location
+        if Self::has_token_like(&tokens, &["skrá", "skra", "register", "new", "ny"], 1) {
+            if let Some(code) = Self::find_location_code(&tokens) {
+                if let Ok(loc) = Location::try_from(code.as_str()) {
+                    self.current_section = AppSection::Register;
+                    self.reg_building = loc.building;
+                    self.reg_floor = loc.floor;
+                    self.reg_room = loc.room;
+                    return true;
+                }
+            }
         }
+
+        // Search (explicit or fallback)
+        if Self::has_token_like(&tokens, &["leita", "leit", "search", "finna", "find"], 2) || !original.contains(' ') {
+            let q = original.replace(|c: char| c == '"' || c == '\'', "").trim().to_string();
+            if !q.is_empty() {
+                self.search_query = q;
+                self.perform_search();
+                self.current_section = AppSection::Search;
+                return true;
+            }
+        }
+
+        // Last resort: treat as search
+        self.search_query = original.to_string();
+        self.perform_search();
+        self.current_section = AppSection::Search;
+        true
     }
+
     // Subtle animated button wrapper: adds hover cursor and a gentle overlay
     fn button_animated(
         ui: &mut egui::Ui,
