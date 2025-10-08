@@ -63,14 +63,13 @@ Gakktu úr skugga um að þú hafir Rust uppsett. Ef ekki, sæktu það á [http
 
 ### Keyra forritið
 
-1. Farðu í verkefnamöppuna:
-```bash
-cd CLAUDE-Lokaverkefni-B
-```
+1. Sóttu verkefnið með því að ýta á græna "Code" takkan og svo "Download Zip"
 
-2. Keyra forritið:
+2. Opnaðu möppuna og inni í henni opnaðu terminal/command prompt
+
+2. keyrðu þessa skipun:
 ```bash
-cargo run --release
+cargo run
 ```
 
 ### Byggja forritið

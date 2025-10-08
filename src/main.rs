@@ -44,7 +44,7 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum AppSection {
     Register,
     Edit,
@@ -140,9 +140,37 @@ struct EquipmentApp {
     show_stats: bool,
     // Sidebar toggle
     show_sidebar: bool,
+    // Command palette
+    show_palette: bool,
+    palette_query: String,
+    palette_focus_on_open: bool,
+    // Command palette selection state
+    palette_selected_index: Option<usize>,
+    // For animated stats
+    _stats_anim_seen: bool,
 }
 
 impl EquipmentApp {
+    // Very small Levenshtein implementation for fuzzy matching (O(n*m), fine for tiny inputs)
+    fn levenshtein(a: &str, b: &str) -> usize {
+        let a_bytes = a.as_bytes();
+        let b_bytes = b.as_bytes();
+        let n = a_bytes.len();
+        let m = b_bytes.len();
+        if n == 0 { return m; }
+        if m == 0 { return n; }
+        let mut prev: Vec<usize> = (0..=m).collect();
+        let mut curr: Vec<usize> = vec![0; m + 1];
+        for i in 1..=n {
+            curr[0] = i;
+            for j in 1..=m {
+                let cost = if a_bytes[i - 1].to_ascii_lowercase() == b_bytes[j - 1].to_ascii_lowercase() { 0 } else { 1 };
+                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[m]
+    }
     // Draw a radio button with black fill when selected, preserving label color
     fn radio_black_value<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, selected: T, label: &str) {
         ui.horizontal(|ui| {
@@ -164,6 +192,168 @@ impl EquipmentApp {
             let label_resp = ui.add(egui::Label::new(label).sense(egui::Sense::click()));
             if label_resp.clicked() { *value = selected; }
         });
+    }
+
+    // Parse and execute palette command; return true if the palette should close
+    fn run_palette_command(&mut self, cmd: &str) -> bool {
+        // ...existing methods...
+        let c = cmd.trim();
+        if c.is_empty() { return false; }
+        let lower = c.to_lowercase();
+
+        // Quick help
+        if lower == "hjálp" || lower == "help" {
+            self.message = "Dæmi: 'sækja 12', 'eyða 12', 'skrá HA-101', 'uppfæra 12 í HA-101', 'leita stóll'".into();
+            return true;
+        }
+
+        // Navigation
+        if lower.starts_with("fara í ") {
+            let rest = lower[7..].trim();
+            match rest {
+                "skrá" => { self.current_section = AppSection::Register; return true; },
+                "breyta" => { self.current_section = AppSection::Edit; return true; },
+                "leita" => { self.current_section = AppSection::Search; return true; },
+                "prenta" => { self.current_section = AppSection::Print; return true; },
+                _ => { self.error_message = format!("Óþekkt leið: {}", rest); return false; }
+            }
+        }
+
+        // Toggle sidebar
+        if lower == "opna lista" { self.show_sidebar = true; return true; }
+        if lower == "fela lista" { self.show_sidebar = false; return true; }
+
+        // Print / PDF
+        if lower == "prenta" { self.print_current_list(); return true; }
+        if lower == "pdf" || lower == "flytja út pdf" { self.export_current_list_pdf(); return true; }
+
+        // JSON
+        if lower == "vista json" { self.save_to_json(); return true; }
+        if lower == "hlaða json" { self.load_from_json(); return true; }
+
+        // Tutorial commands removed
+
+        // sækja <id>
+        if lower.starts_with("sækja ") {
+            if let Some(id_str) = lower.split_whitespace().nth(1) {
+                if id_str.chars().all(|c| c.is_ascii_digit()) {
+                    self.edit_id = id_str.to_string();
+                    self.fetch_equipment_for_edit();
+                    self.current_section = AppSection::Edit;
+                    return true;
+                }
+            }
+            self.error_message = "Notkun: sækja <id>".into();
+            return false;
+        }
+
+        // eyða <id>
+        if lower.starts_with("eyða ") || lower.starts_with("eyda ") {
+            let id_str = lower.split_whitespace().nth(1).unwrap_or("");
+            if id_str.chars().all(|c| c.is_ascii_digit()) {
+                self.edit_id = id_str.to_string();
+                self.fetch_equipment_for_edit();
+                self.delete_equipment();
+                return true;
+            }
+            self.error_message = "Notkun: eyða <id>".into();
+            return false;
+        }
+
+        // leita <text>
+        if lower.starts_with("leita ") {
+            let q = c[6..].trim();
+            self.search_query = q.to_string();
+            self.perform_search();
+            self.current_section = AppSection::Search;
+            return true;
+        }
+
+        // skrá <code>  where code is like HA-101 or S-569 -> S 5th floor room 69
+        if lower.starts_with("skrá ") || lower.starts_with("skra ") {
+            let code = c.split_whitespace().nth(1).unwrap_or("");
+            if let Ok(loc) = Location::try_from(code) {
+                self.current_section = AppSection::Register;
+                self.reg_building = loc.building;
+                self.reg_floor = loc.floor;
+                self.reg_room = loc.room;
+                return true;
+            } else {
+                self.error_message = "Notkun: skrá <HA|H|S>-<hæð><stofa> t.d. S-569".into();
+                return false;
+            }
+        }
+
+        // uppfæra <id> í <code>
+        if lower.starts_with("uppfæra ") || lower.starts_with("uppfaera ") {
+            let parts: Vec<&str> = lower.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let id_str = parts[1];
+                // Find the location code after 'í' or 'i'
+                let mut code_opt: Option<&str> = None;
+                for w in parts.iter().skip(2) {
+                    if *w == "í" || *w == "i" { continue; }
+                    code_opt = Some(*w);
+                    break;
+                }
+                if let (true, Some(code)) = (id_str.chars().all(|c| c.is_ascii_digit()), code_opt) {
+                    if let Ok(loc) = Location::try_from(code) {
+                        self.current_section = AppSection::Edit;
+                        self.edit_id = id_str.to_string();
+                        self.fetch_equipment_for_edit();
+                        // Apply update
+                        self.edit_building = loc.building;
+                        self.edit_floor = loc.floor;
+                        self.edit_room = loc.room;
+                        self.update_location();
+                        return true;
+                    }
+                }
+            }
+            self.error_message = "Notkun: uppfæra <id> í <HA|H|S>-<hæð><stofa>".into();
+            return false;
+        }
+
+        // direct section keywords
+        match lower.as_str() {
+            "skrá" | "skra" => { self.current_section = AppSection::Register; true },
+            "breyta" => { self.current_section = AppSection::Edit; true },
+            "leita" => { self.current_section = AppSection::Search; true },
+            "prenta" => { self.current_section = AppSection::Print; true },
+            _ => { self.error_message = format!("Óþekkt skipun: {}", c); false }
+        }
+    }
+    // Subtle animated button wrapper: adds hover cursor and a gentle overlay
+    fn button_animated(
+        ui: &mut egui::Ui,
+        text: impl Into<egui::WidgetText>,
+    ) -> egui::Response {
+        let rounding = ui.style().visuals.widgets.inactive.rounding;
+        let tint = egui::Color32::from_white_alpha(12);
+        let resp = ui.add(egui::Button::new(text));
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let rect = resp.rect;
+            ui.painter().rect_filled(rect, rounding, tint);
+        }
+        resp
+    }
+
+    // Clickable cell with hover highlight; sized to fit table cells
+    fn clickable_cell(
+        ui: &mut egui::Ui,
+        text: impl Into<egui::WidgetText>,
+        size: [f32; 2],
+    ) -> egui::Response {
+        let rounding = ui.style().visuals.widgets.inactive.rounding;
+        let tint = egui::Color32::from_white_alpha(18);
+        let resp = ui.add_sized(size, egui::Label::new(text).sense(egui::Sense::click()));
+        if resp.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let rect = resp.rect;
+            ui.painter().rect_filled(rect, rounding, tint);
+        }
+        resp
     }
     fn new() -> Self {
         let db = Database::new("equipment.db").expect("Failed to create database");
@@ -206,6 +396,11 @@ impl EquipmentApp {
             error_message: String::new(),
             show_stats: false,
             show_sidebar: false,
+            show_palette: false,
+            palette_query: String::new(),
+            palette_focus_on_open: false,
+            palette_selected_index: None,
+            _stats_anim_seen: false,
         };
         // Run initial search so users don't need to click "Sækja" or type to see data
         this.perform_search();
@@ -395,7 +590,7 @@ impl EquipmentApp {
                 // Start debounce timer on every change
                 self.edit_id_changed_at = Some(std::time::Instant::now());
             }
-            if ui.button("🔍 Sækja").clicked() {
+            if Self::button_animated(ui, "🔍 Sækja").clicked() {
                 self.fetch_equipment_for_edit();
                 // Clear debounce state after explicit fetch
                 self.edit_id_changed_at = None;
@@ -473,8 +668,7 @@ impl EquipmentApp {
             );
             
             ui.add_space(15.0);
-            
-            if ui.button("✅ Uppfæra staðsetningu").clicked() {
+            if Self::button_animated(ui, "✅ Uppfæra staðsetningu").clicked() {
                 self.update_location();
             }
             
@@ -489,7 +683,7 @@ impl EquipmentApp {
             ui.label("⚠ Varúð: Þessi aðgerð er óafturkræf!");
             ui.add_space(10.0);
             
-            if ui.button("❌ Eyða búnaði").clicked() {
+            if Self::button_animated(ui, "❌ Eyða búnaði").clicked() {
                 self.delete_equipment();
             }
         } else if !self.edit_id.is_empty() {
@@ -687,11 +881,11 @@ impl EquipmentApp {
                             let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
                             body.row(row_h, |mut row| {
                                 let mut clicked_any = false;
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, id.to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, equipment.get_type_name().to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, location_str.clone(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, format!("{} kr.", value), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, format!("{}", equipment), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
 
                                 if clicked_any {
                                     self.search_selected_index = Some(i);
@@ -860,17 +1054,17 @@ impl EquipmentApp {
         // Align JSON and print/PDF controls on one row; remove manual "Birta" (auto-refresh is on)
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button("💾 Vista í JSON").clicked() {
+            if Self::button_animated(ui, "💾 Vista í JSON").clicked() {
                 self.save_to_json();
             }
-            if ui.button("📂 Hlaða úr JSON").clicked() {
+            if Self::button_animated(ui, "📂 Hlaða úr JSON").clicked() {
                 self.load_from_json();
             }
             ui.add_space(12.0);
-            if ui.button("📄 Prenta lista").clicked() {
+            if Self::button_animated(ui, "📄 Prenta lista").clicked() {
                 self.print_current_list();
             }
-            if ui.button("💾 Flytja út í PDF").clicked() {
+            if Self::button_animated(ui, "💾 Flytja út í PDF").clicked() {
                 self.export_current_list_pdf();
             }
         });
@@ -920,11 +1114,11 @@ impl EquipmentApp {
                             let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
                             body.row(row_h, |mut row| {
                                 let mut clicked_any = false;
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, id.to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, equipment.get_type_name(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, location_str.clone(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, format!("{} kr.", value), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if Self::clickable_cell(ui, format!("{}", equipment), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
 
                                 if clicked_any {
                                     // From Prenta: go to Edit with back button to printing
@@ -1402,7 +1596,7 @@ impl eframe::App for EquipmentApp {
         
         ctx.set_style(style);
 
-        // Modern header with better margins and sidebar toggle
+    // Modern header with better margins and sidebar toggle
         egui::TopBottomPanel::top("app_header")
             .frame(
                 egui::Frame::default()
@@ -1419,12 +1613,7 @@ impl eframe::App for EquipmentApp {
                     ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans").color(egui::Color32::WHITE).size(24.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let arrow = "↔"; // U+2194 (no FE0F)
-                        let btn = egui::Button::new(
-                            egui::RichText::new(if self.show_sidebar { format!("{arrow} Fela lista") } else { "📋 Sjá lista".into() })
-                                .color(egui::Color32::WHITE),
-                        );
-                        //let btn = egui::Button::new(egui::RichText::new(if self.show_sidebar { "↔︎ Fela lista" } else { "📋 Sjá lista" }).color(egui::Color32::WHITE));
-                        if ui.add(btn).clicked() { 
+                        if Self::button_animated(ui, egui::RichText::new(if self.show_sidebar { format!("{arrow} Fela lista") } else { "📋 Sjá lista".into() }).color(egui::Color32::WHITE)).clicked() {
                             self.show_sidebar = !self.show_sidebar; 
                             // Refresh sidebar data when opening
                             if self.show_sidebar {
@@ -1432,6 +1621,13 @@ impl eframe::App for EquipmentApp {
                                 self.load_equipment();
                             }
                         }
+                        ui.add_space(8.0);
+                        if Self::button_animated(ui, egui::RichText::new("⌘K Skipunir").color(egui::Color32::WHITE)).clicked() {
+                            self.show_palette = true;
+                            self.palette_query.clear();
+                            self.palette_focus_on_open = true;
+                        }
+                        // Tutorial button removed
                     });
                 });
             });
@@ -1448,6 +1644,120 @@ impl eframe::App for EquipmentApp {
                     self.app_icon_tex = Some(tex);
                 }
             }
+        }
+
+        // Keyboard: Command Palette toggle (Cmd+K)
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
+            self.show_palette = !self.show_palette;
+            self.palette_query.clear();
+            if self.show_palette { self.palette_focus_on_open = true; }
+        }
+
+        // Keyboard: Esc closes palette when open
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_palette { self.show_palette = false; }
+        }
+
+        if self.show_palette {
+            egui::Window::new("Valmynd")
+                .collapsible(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.set_min_width(420.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Valmynd").strong());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if Self::button_animated(ui, "❌").clicked() { self.show_palette = false; }
+                        });
+                    });
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.palette_query)
+                            .hint_text("t.d. \"eyða 23\", \"skrá HA-123\", \"leita stóll\"")
+                    );
+                    if self.palette_focus_on_open { resp.request_focus(); self.palette_focus_on_open = false; }
+                    ui.add_space(6.0);
+                    // Suggestions with fuzzy ranking
+                    let q = self.palette_query.trim().to_lowercase();
+                    let base: [(&str, &str); 15] = [
+                        ("Fara í Skrá", "fara í skrá"),
+                        ("Fara í Breyta", "fara í breyta"),
+                        ("Fara í Leita", "fara í leita"),
+                        ("Fara í Prenta", "fara í prenta"),
+                        ("Sækja ID", "sækja 123"),
+                        ("Eyða ID", "eyða 123"),
+                        ("Skrá staðsetningu", "skrá HA-101"),
+                        ("Uppfæra staðsetningu ID", "uppfæra 123 í HA-101"),
+                        ("Leita", "leita stóll"),
+                        ("Prenta", "prenta"),
+                        ("Flytja út PDF", "pdf"),
+                        ("Vista JSON", "vista json"),
+                        ("Hlaða JSON", "hlaða json"),
+                        ("Opna lista (hægri)", "opna lista"),
+                        ("Fela lista (hægri)", "fela lista"),
+                    ];
+                    let mut items: Vec<(String, String, usize)> = base.iter().map(|(l,c)| {
+                        let label = l.to_string();
+                        let cmd = c.to_string();
+                        let key = format!("{} {}", label.to_lowercase(), cmd.to_lowercase());
+                        let score = if q.is_empty() { 0 } else { Self::levenshtein(&q, &key) };
+                        (label, cmd, score)
+                    }).collect();
+                    items.sort_by_key(|(_,_,s)| *s);
+                    // Keep only decent matches if user typed something (distance threshold)
+                    if !q.is_empty() {
+                        items.retain(|(l,c,s)| {
+                            let min_len = q.len().min(l.len().min(c.len()));
+                            *s <= (min_len / 2).max(1)
+                                || l.to_lowercase().contains(&q)
+                                || c.to_lowercase().contains(&q)
+                        });
+                    }
+                    // Selection with keys: Tab/Shift+Tab or arrows
+                    let total = items.len();
+                    if total > 0 {
+                        // Initialize selection
+                        if self.palette_selected_index.is_none() { self.palette_selected_index = Some(0); }
+                        let mut idx = self.palette_selected_index.unwrap_or(0).min(total - 1);
+                        let next = |i: usize, t: usize| if i + 1 >= t { 0 } else { i + 1 };
+                        let prev = |i: usize, t: usize| if i == 0 { t - 1 } else { i - 1 };
+                        let (tab, shift) = ui.input(|i| (i.key_pressed(egui::Key::Tab), i.modifiers.shift));
+                        if tab {
+                            idx = if shift { prev(idx, total) } else { next(idx, total) };
+                        }
+                        let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
+                        if down { idx = next(idx, total); }
+                        if up { idx = prev(idx, total); }
+                        self.palette_selected_index = Some(idx);
+
+                        // Enter: run highlighted suggestion if present; otherwise run raw query
+                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            if let Some((_, cmd, _)) = items.get(idx).cloned() {
+                                if self.run_palette_command(cmd.as_str()) { self.show_palette = false; }
+                            } else {
+                                let cmd = self.palette_query.clone();
+                                if self.run_palette_command(cmd.trim()) { self.show_palette = false; }
+                            }
+                        }
+
+                        // Render suggestions with highlight
+                        for (i, (label, cmd, _score)) in items.iter().enumerate() {
+                            let is_sel = Some(i) == self.palette_selected_index;
+                            let text = if is_sel { format!("▶ {}", label) } else { label.clone() };
+                            let clicked = Self::button_animated(ui, text).clicked();
+                            if clicked {
+                                if self.run_palette_command(cmd) { self.show_palette = false; }
+                            }
+                        }
+                    } else {
+                        // No items: allow Enter to run raw command for power users
+                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            let cmd = self.palette_query.clone();
+                            if self.run_palette_command(cmd.trim()) { self.show_palette = false; }
+                        }
+                        ui.label(egui::RichText::new("Engar tillögur").italics());
+                    }
+                });
         }
 
         // Right sidebar with full equipment list (auto-refreshes)
@@ -1533,12 +1843,12 @@ impl eframe::App for EquipmentApp {
                                     let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
                                     body.row(row_h, |mut row| {
                                         let mut clicked_any = false;
-                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
-                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if Self::clickable_cell(ui, id.to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if Self::clickable_cell(ui, equipment.get_type_name(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if Self::clickable_cell(ui, location_str.clone(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if Self::clickable_cell(ui, format!("{} kr.", value), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
                                         if show_description {
-                                            row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                            row.col(|ui| { if Self::clickable_cell(ui, format!("{}", equipment), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
                                         }
 
                                         if clicked_any {
@@ -1625,7 +1935,6 @@ impl eframe::App for EquipmentApp {
                 });
                 ui.add_space(5.0);
             }
-            
             ui.add_space(10.0);
             
             // Content
@@ -1637,18 +1946,8 @@ impl eframe::App for EquipmentApp {
             }
         });
 
-        // Persistent footer with author and year, improved contrast and margins
-        egui::TopBottomPanel::bottom("app_footer")
-            .frame(
-                egui::Frame::default()
-                    .fill(egui::Color32::from_rgb(60, 100, 140))
-                    .inner_margin(egui::Margin::symmetric(16.0, 8.0))
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(180)))
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Daníel Snær Rodríguez, 2025").color(egui::Color32::WHITE).strong());
-                });
-            });
-    }
+    // Tutorial overlay removed
+
+}
+
 }
