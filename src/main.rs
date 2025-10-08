@@ -147,13 +147,15 @@ impl EquipmentApp {
     fn radio_black_value<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, selected: T, label: &str) {
         ui.horizontal(|ui| {
             let size = ui.spacing().interact_size.y;
-            let (rect, mut resp) = ui.allocate_at_least(egui::vec2(size, size), egui::Sense::click());
+            let (rect, resp) = ui.allocate_at_least(egui::vec2(size, size), egui::Sense::click());
             let is_selected = *value == selected;
             if resp.clicked() { *value = selected; }
             // Paint black-dot radio
             let center = rect.center();
             let outer_r = rect.height() * 0.35;
-            let inner_r = outer_r * 0.55;
+            let inner_r = outer_r * 0.45; // slightly smaller for clearer ring
+            // White-filled ring with black outline for strong contrast on gray
+            ui.painter().circle_filled(center, outer_r, egui::Color32::WHITE);
             ui.painter().circle_stroke(center, outer_r, egui::Stroke { width: 1.5, color: egui::Color32::BLACK });
             if is_selected {
                 ui.painter().circle_filled(center, inner_r, egui::Color32::BLACK);
