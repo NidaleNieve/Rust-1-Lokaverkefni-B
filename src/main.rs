@@ -19,6 +19,7 @@ use projector::Projector;
 use table::Table;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::process::Command;
 
 fn main() -> Result<(), eframe::Error> {
     // Build viewport and set app icon if available
@@ -580,9 +581,6 @@ impl EquipmentApp {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label(format!("Fjöldi niðurstaðna: {} atriði", self.search_results.len()));
-                if ui.button("🔄 Uppfæra").clicked() {
-                    self.perform_search();
-                }
                 if self.sort_column.is_some() {
                     if ui.button("🔄 Endurstilla röðun").clicked() {
                         self.sort_column = None;
@@ -828,6 +826,16 @@ impl EquipmentApp {
         if ui.button("📂 Hlaða úr JSON").clicked() {
             self.load_from_json();
         }
+
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("🖨️ Prenta lista").clicked() {
+                self.print_current_list();
+            }
+            if ui.button("🧾 Flytja út í PDF").clicked() {
+                self.export_current_list_pdf();
+            }
+        });
         
         ui.add_space(10.0);
         
@@ -836,7 +844,6 @@ impl EquipmentApp {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label(format!("Fjöldi: {} atriði", self.displayed_equipment.len()));
-                if ui.button("🔄 Uppfæra").clicked() { self.load_equipment(); }
                 if self.sort_column.is_some() {
                     if ui.button("🔄 Endurstilla röðun").clicked() {
                         self.sort_column = None;
@@ -893,6 +900,107 @@ impl EquipmentApp {
                         }
                     });
             });
+        }
+    }
+
+    fn escape_html(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    }
+
+    fn generate_print_html(&self) -> String {
+        // Build a simple, print-friendly HTML page with the current displayed_equipment
+        let mut rows = String::new();
+        for eq in &self.displayed_equipment {
+            let id = eq.get_id().unwrap_or(0).to_string();
+            let typ = eq.get_type_name().to_string();
+            let (location_str, value) = match eq {
+                Equipment::Table(t) => (format!("{}", t.location), t.value),
+                Equipment::Chair(c) => (format!("{}", c.location), c.value),
+                Equipment::Projector(p) => (format!("{}", p.location), p.value),
+            };
+            let desc = format!("{}", eq);
+            rows.push_str(&format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{} kr.</td><td>{}</td></tr>",
+                Self::escape_html(&id),
+                Self::escape_html(&typ),
+                Self::escape_html(&location_str),
+                value,
+                Self::escape_html(&desc)
+            ));
+        }
+
+        let title = "Búnaðarlisti Tækniskólans - Prentun";
+        let style = r#"
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 24px; }
+            h1 { margin-bottom: 8px; }
+            .meta { color: #555; margin-bottom: 16px; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 12px; }
+            th { background: #f5f7fb; }
+            @media print { body { margin: 0; } }
+        "#;
+        let script = r#"
+            window.addEventListener('load', () => {
+                // Try to auto-open print dialog
+                try { window.print(); } catch (_) {}
+            });
+        "#;
+
+        format!(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><title>{}</title><style>{}</style><script>{}</script></head><body><h1>{}</h1><div class='meta'>Fjöldi: {} atriði</div><table><thead><tr><th>ID</th><th>Tegund</th><th>Staðsetning</th><th>Verðmæti</th><th>Lýsing</th></tr></thead><tbody>{}</tbody></table></body></html>",
+            title, style, script, title, self.displayed_equipment.len(), rows
+        )
+    }
+
+    fn print_current_list(&mut self) {
+        // Write HTML to a temporary file and open it to trigger the OS print dialog
+        self.error_message.clear();
+        self.message.clear();
+        let html = self.generate_print_html();
+        let mut path = std::env::temp_dir();
+        path.push("bunadarlisti_prenta.html");
+        match std::fs::write(&path, html) {
+            Ok(_) => {
+                // On macOS, 'open' will use default browser which will run window.print()
+                let _ = Command::new("open").arg(&path).spawn();
+                self.message = "📄 Opnaði prentglugga í vafra".into();
+            }
+            Err(e) => {
+                self.error_message = format!("❌ Gat ekki útbúið prentun: {}", e);
+            }
+        }
+    }
+
+    fn export_current_list_pdf(&mut self) {
+        self.error_message.clear();
+        self.message.clear();
+        // Ask user where to save the PDF
+        if let Some(dest) = FileDialog::new().set_file_name("bunadarlisti.pdf").add_filter("PDF", &["pdf"]).save_file() {
+            // Create temp HTML and attempt conversion via wkhtmltopdf if available
+            let html = self.generate_print_html();
+            let mut tmp = std::env::temp_dir();
+            tmp.push("bunadarlisti_export.html");
+            if let Err(e) = std::fs::write(&tmp, html) {
+                self.error_message = format!("❌ Gat ekki undirbúið útflutning: {}", e);
+                return;
+            }
+
+            // Try using wkhtmltopdf if installed
+            let status = Command::new("sh")
+                .arg("-c")
+                .arg(format!("command -v wkhtmltopdf >/dev/null 2>&1 && wkhtmltopdf '{}' '{}'", tmp.display(), dest.display()))
+                .status();
+
+            match status {
+                Ok(s) if s.success() => {
+                    self.message = format!("✅ Vistað PDF í {}", dest.display());
+                }
+                _ => {
+                    // Fallback: open HTML and ask user to Save as PDF from print dialog
+                    let _ = Command::new("open").arg(&tmp).spawn();
+                    self.error_message = "⚠️ Gat ekki umbreytt í PDF sjálfvirkt (vantar 'wkhtmltopdf'). Opnaði skrá í vafra — veldu File → Print → Save as PDF.".into();
+                }
+            }
         }
     }
     
