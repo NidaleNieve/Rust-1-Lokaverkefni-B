@@ -20,6 +20,7 @@ impl Equipment {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_id(&mut self, id: i64) {
         match self {
             Equipment::Table(t) => t.id = Some(id),

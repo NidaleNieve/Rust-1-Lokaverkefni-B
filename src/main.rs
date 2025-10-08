@@ -59,7 +59,7 @@ enum EquipmentType {
     Projector,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 enum DisplayFilter {
     All,
     ByBuilding,
@@ -103,6 +103,8 @@ struct EquipmentApp {
     
     // Edit fields (combined update/delete)
     edit_id: String,
+    // Debounce timestamp for auto-fetching by ID in Edit
+    edit_id_changed_at: Option<std::time::Instant>,
     edit_equipment: Option<Equipment>,
     edit_building: Building,
     edit_floor: u8,
@@ -141,6 +143,26 @@ struct EquipmentApp {
 }
 
 impl EquipmentApp {
+    // Draw a radio button with black fill when selected, preserving label color
+    fn radio_black_value<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, selected: T, label: &str) {
+        ui.horizontal(|ui| {
+            let size = ui.spacing().interact_size.y;
+            let (rect, mut resp) = ui.allocate_at_least(egui::vec2(size, size), egui::Sense::click());
+            let is_selected = *value == selected;
+            if resp.clicked() { *value = selected; }
+            // Paint black-dot radio
+            let center = rect.center();
+            let outer_r = rect.height() * 0.35;
+            let inner_r = outer_r * 0.55;
+            ui.painter().circle_stroke(center, outer_r, egui::Stroke { width: 1.5, color: egui::Color32::BLACK });
+            if is_selected {
+                ui.painter().circle_filled(center, inner_r, egui::Color32::BLACK);
+            }
+            ui.add_space(6.0);
+            let label_resp = ui.add(egui::Label::new(label).sense(egui::Sense::click()));
+            if label_resp.clicked() { *value = selected; }
+        });
+    }
     fn new() -> Self {
         let db = Database::new("equipment.db").expect("Failed to create database");
         
@@ -159,6 +181,7 @@ impl EquipmentApp {
             reg_chair_type: ChairType::Skolastoll,
             reg_projector_lumens: String::new(),
             edit_id: String::new(),
+            edit_id_changed_at: None,
             edit_equipment: None,
             edit_building: Building::Hafnarfjordur,
             edit_floor: 1,
@@ -227,12 +250,14 @@ impl EquipmentApp {
         ui.heading("📝 Skrá nýjan búnað");
         ui.separator();
         
+        // Custom black-dot radios (button only) with extra spacing; label stays default color
         ui.horizontal(|ui| {
             ui.label("Tegund búnaðar:");
-            ui.radio_value(&mut self.reg_equipment_type, EquipmentType::Table, "■ Borð"); // U+25A1 (outline)
-            //ui.radio_value(&mut self.reg_equipment_type, EquipmentType::Table, "🪑 Borð");
-            ui.radio_value(&mut self.reg_equipment_type, EquipmentType::Chair, "💺 Stóll");
-            ui.radio_value(&mut self.reg_equipment_type, EquipmentType::Projector, "📽 Skjávarpi");
+            Self::radio_black_value(ui, &mut self.reg_equipment_type, EquipmentType::Table, "■ Borð");
+            ui.add_space(12.0);
+            Self::radio_black_value(ui, &mut self.reg_equipment_type, EquipmentType::Chair, "💺 Stóll");
+            ui.add_space(12.0);
+            Self::radio_black_value(ui, &mut self.reg_equipment_type, EquipmentType::Projector, "📽 Skjávarpi");
         });
         
         ui.add_space(10.0);
@@ -363,11 +388,27 @@ impl EquipmentApp {
         
         ui.horizontal(|ui| {
             ui.label("ID búnaðar:");
-            ui.text_edit_singleline(&mut self.edit_id);
+            let resp = ui.text_edit_singleline(&mut self.edit_id);
+            if resp.changed() {
+                // Start debounce timer on every change
+                self.edit_id_changed_at = Some(std::time::Instant::now());
+            }
             if ui.button("🔍 Sækja").clicked() {
                 self.fetch_equipment_for_edit();
+                // Clear debounce state after explicit fetch
+                self.edit_id_changed_at = None;
             }
         });
+        // Debounced auto-fetch: 300ms after last edit, if ID is numeric
+        if let Some(t0) = self.edit_id_changed_at {
+            if t0.elapsed() >= Duration::from_millis(300)
+                && !self.edit_id.is_empty()
+                && self.edit_id.chars().all(|c| c.is_ascii_digit())
+            {
+                self.fetch_equipment_for_edit();
+                self.edit_id_changed_at = None;
+            }
+        }
         
         ui.add_space(10.0);
         
@@ -621,7 +662,7 @@ impl EquipmentApp {
                 let table = TableBuilder::new(ui)
                     .striped(true)
                     .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .cell_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight))
                     .column(Column::initial(80.0).resizable(true)) // ID
                     .column(Column::initial(120.0).resizable(true)) // Tegund
                     .column(Column::initial(160.0).resizable(true)) // Staðsetning
@@ -630,19 +671,11 @@ impl EquipmentApp {
 
                 table
                     .header(22.0, |mut header| {
-                        header.col(|ui| {
-                            if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); }
-                        });
-                        header.col(|ui| {
-                            if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); }
-                        });
-                        header.col(|ui| {
-                            if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); }
-                        });
-                        header.col(|ui| {
-                            if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); }
-                        });
-                        header.col(|ui| { ui.label("Lýsing"); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { ui.label("Lýsing"); }); });
                     })
                     .body(|mut body| {
                         let row_h = 22.0;
@@ -745,11 +778,15 @@ impl EquipmentApp {
         
         ui.horizontal(|ui| {
             ui.label("Sía:");
-            ui.radio_value(&mut self.display_filter, DisplayFilter::All, "Allur búnaður");
-            ui.radio_value(&mut self.display_filter, DisplayFilter::ByBuilding, "Eftir húsi");
-            ui.radio_value(&mut self.display_filter, DisplayFilter::ByType, "Eftir tegund");
-            ui.radio_value(&mut self.display_filter, DisplayFilter::ByRoom, "Eftir stofu");
-            ui.radio_value(&mut self.display_filter, DisplayFilter::ByFloor, "Eftir hæð");
+            Self::radio_black_value(ui, &mut self.display_filter, DisplayFilter::All, "Allur búnaður");
+            ui.add_space(10.0);
+            Self::radio_black_value(ui, &mut self.display_filter, DisplayFilter::ByBuilding, "Eftir húsi");
+            ui.add_space(10.0);
+            Self::radio_black_value(ui, &mut self.display_filter, DisplayFilter::ByType, "Eftir tegund");
+            ui.add_space(10.0);
+            Self::radio_black_value(ui, &mut self.display_filter, DisplayFilter::ByRoom, "Eftir stofu");
+            ui.add_space(10.0);
+            Self::radio_black_value(ui, &mut self.display_filter, DisplayFilter::ByFloor, "Eftir hæð");
         });
         
         ui.add_space(10.0);
@@ -771,9 +808,11 @@ impl EquipmentApp {
             DisplayFilter::ByType => {
                 ui.horizontal(|ui| {
                     ui.label("Tegund:");
-                    ui.radio_value(&mut self.display_type, EquipmentType::Table, "Borð");
-                    ui.radio_value(&mut self.display_type, EquipmentType::Chair, "Stóll");
-                    ui.radio_value(&mut self.display_type, EquipmentType::Projector, "Skjávarpi");
+                    Self::radio_black_value(ui, &mut self.display_type, EquipmentType::Table, "Borð");
+                    ui.add_space(10.0);
+                    Self::radio_black_value(ui, &mut self.display_type, EquipmentType::Chair, "Stóll");
+                    ui.add_space(10.0);
+                    Self::radio_black_value(ui, &mut self.display_type, EquipmentType::Projector, "Skjávarpi");
                 });
             }
             DisplayFilter::ByRoom => {
@@ -816,20 +855,16 @@ impl EquipmentApp {
         
         ui.add_space(10.0);
         
-        if ui.button("🔍 Birta").clicked() {
-            self.load_equipment();
-        }
-        
-        if ui.button("💾 Vista í JSON").clicked() {
-            self.save_to_json();
-        }
-        
-        if ui.button("📂 Hlaða úr JSON").clicked() {
-            self.load_from_json();
-        }
-
+        // Align JSON and print/PDF controls on one row; remove manual "Birta" (auto-refresh is on)
         ui.add_space(6.0);
         ui.horizontal(|ui| {
+            if ui.button("💾 Vista í JSON").clicked() {
+                self.save_to_json();
+            }
+            if ui.button("📂 Hlaða úr JSON").clicked() {
+                self.load_from_json();
+            }
+            ui.add_space(12.0);
             if ui.button("📄 Prenta lista").clicked() {
                 self.print_current_list();
             }
@@ -860,7 +895,7 @@ impl EquipmentApp {
                 let table = TableBuilder::new(ui)
                     .striped(true)
                     .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                    .cell_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight))
                     .column(Column::initial(80.0).resizable(true)) // ID
                     .column(Column::initial(120.0).resizable(true)) // Tegund
                     .column(Column::initial(160.0).resizable(true)) // Staðsetning
@@ -869,11 +904,11 @@ impl EquipmentApp {
 
                 table
                     .header(22.0, |mut header| {
-                        header.col(|ui| { if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); } });
-                        header.col(|ui| { if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); } });
-                        header.col(|ui| { if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); } });
-                        header.col(|ui| { if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); } });
-                        header.col(|ui| { ui.label("Lýsing"); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); } }); });
+                        header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { ui.label("Lýsing"); }); });
                     })
                     .body(|mut body| {
                         let row_h = 22.0;
@@ -1468,7 +1503,7 @@ impl eframe::App for EquipmentApp {
                         let mut table = TableBuilder::new(ui)
                             .striped(true)
                             .resizable(true)
-                            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                            .cell_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight))
                             .column(Column::initial(60.0).resizable(true))
                             .column(Column::initial(110.0).resizable(true))
                             .column(Column::initial(130.0).resizable(true))
@@ -1480,22 +1515,12 @@ impl eframe::App for EquipmentApp {
 
                         table
                             .header(20.0, |mut header| {
-                                header.col(|ui| {
-                                    if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); }
-                                });
-                                header.col(|ui| {
-                                    if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); }
-                                });
-                                header.col(|ui| {
-                                    if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); }
-                                });
-                                header.col(|ui| {
-                                    if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); }
-                                });
+                                header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("ID{}", self.sort_indicator(SortColumn::Id))).clicked() { self.toggle_sort(SortColumn::Id); } }); });
+                                header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Tegund{}", self.sort_indicator(SortColumn::Type))).clicked() { self.toggle_sort(SortColumn::Type); } }); });
+                                header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Staðsetning{}", self.sort_indicator(SortColumn::Location))).clicked() { self.toggle_sort(SortColumn::Location); } }); });
+                                header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { if ui.button(format!("Verðmæti{}", self.sort_indicator(SortColumn::Value))).clicked() { self.toggle_sort(SortColumn::Value); } }); });
                                 if show_description {
-                                    header.col(|ui| {
-                                        ui.label("Lýsing");
-                                    });
+                                    header.col(|ui| { ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| { ui.label("Lýsing"); }); });
                                 }
                             })
                             .body(|mut body| {

@@ -5,13 +5,13 @@
 
 ## Hugbúnaður til að halda utan um búnað Tækniskólans í Rust með myndrænu notendaviðmóti.
 
-## Eiginleikar
+## Eiginleikar (GPT Generated)
 
 ### Kjarnaaðgerðir
 - ✅ **Skrá búnað**: Borð, stóla og skjávarpa með öllu viðeigandi upplýsingum
-- ✅ **Uppfæra staðsetningu**: Breyta staðsetningu búnaðar með auðveldu viðmóti
-- ✅ **Eyða búnaði**: Fjarlægja búnað úr kerfinu
-- ✅ **SQLite gagnagrunnur**: Öll gögn vistuð í gagnagrunn
+- ✅ **Breyta Búnað**: Breyta staðsetningu búnaðar eða eyða honum
+- ✅ **Prenta Búnað**: Sjá listann og filtera hann. Einnig hægt að prenta hann og vista hann sem JSON
+- ✅ **SQLite gagnagrunnur**: Öll gögn vistuð í gagnagrunn, hægt er að vista og hlaða frá JSON skjai
 
 ### Birting og síun
 - 📋 **Allur búnaður**: Skoða allan búnað í kerfinu
@@ -21,10 +21,12 @@
 - 📊 **Eftir hæð**: Skoða búnað á tiltekinni hæð í húsi
 
 ### Ítarlegir eiginleikar
-- 🔍 **Leitar virkni**: Leita að búnaði með leitarreit
+- 🔍 **Leitar virkni**: Leita að búnaði með leitarreit sem leitar gegnum allt
 - ↕️ **Röðunareiginleikar**: Smelltu á dálkahausa til að raða eftir ID, tegund, staðsetningu eða verðmæti (hækkandi/lækkandi)
 - 💾 **JSON útflutningur**: Vista öll gögn í JSON skrá
 - 📂 **JSON innflutningur**: Hlaða gögnum úr JSON skrá
+- 💾 **Prenta**: Hægt er að prenta síaða listann
+- 📂 **Vista sem PDF**: Hægt er að vista síaða listann sem PDF
 - 🎨 **Falleg sýn**: Vel sniðin úttak með fulltum lýsingum
 - 📱 **Notendavænt viðmót**: Dropdown valmyndir og sleðar fyrir staðsetningar
 
