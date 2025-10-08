@@ -44,7 +44,7 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq)]
 enum AppSection {
     Register,
     Edit,
@@ -140,69 +140,9 @@ struct EquipmentApp {
     show_stats: bool,
     // Sidebar toggle
     show_sidebar: bool,
-    // Command palette
-    show_palette: bool,
-    palette_query: String,
-    palette_focus_on_open: bool,
-    // Command palette selection state
-    palette_selected_index: Option<usize>,
-    // For animated stats
-    _stats_anim_seen: bool,
 }
 
 impl EquipmentApp {
-    // Normalize input for fuzzy comparisons (lowercase and map Icelandic accents)
-    fn norm(s: &str) -> String {
-        let lower = s.trim().to_lowercase();
-        lower
-            .replace('á', "a").replace('é', "e").replace('í', "i").replace('ó', "o")
-            .replace('ú', "u").replace('ý', "y").replace('ð', "d").replace('þ', "th")
-            .replace('æ', "ae").replace('ö', "o")
-    }
-
-    fn has_token_like(tokens: &[&str], words: &[&str], max_dist: usize) -> bool {
-        for &t in tokens {
-            let tn = Self::norm(t);
-            for &w in words {
-                if Self::levenshtein(&tn, &Self::norm(w)) <= max_dist { return true; }
-            }
-        }
-        false
-    }
-
-    fn find_number<'a>(tokens: &'a [&'a str]) -> Option<&'a str> {
-        tokens.iter().copied().find(|t| t.chars().all(|c| c.is_ascii_digit()))
-    }
-
-    fn find_location_code(tokens: &[&str]) -> Option<String> {
-        for &t in tokens {
-            let try_vals = [t.to_string(), t.to_uppercase()];
-            for val in try_vals {
-                if Location::try_from(val.as_str()).is_ok() { return Some(val); }
-            }
-        }
-        None
-    }
-    // Very small Levenshtein implementation for fuzzy matching (O(n*m), fine for tiny inputs)
-    fn levenshtein(a: &str, b: &str) -> usize {
-        let a_bytes = a.as_bytes();
-        let b_bytes = b.as_bytes();
-        let n = a_bytes.len();
-        let m = b_bytes.len();
-        if n == 0 { return m; }
-        if m == 0 { return n; }
-        let mut prev: Vec<usize> = (0..=m).collect();
-        let mut curr: Vec<usize> = vec![0; m + 1];
-        for i in 1..=n {
-            curr[0] = i;
-            for j in 1..=m {
-                let cost = if a_bytes[i - 1].to_ascii_lowercase() == b_bytes[j - 1].to_ascii_lowercase() { 0 } else { 1 };
-                curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
-            }
-            std::mem::swap(&mut prev, &mut curr);
-        }
-        prev[m]
-    }
     // Draw a radio button with black fill when selected, preserving label color
     fn radio_black_value<T: PartialEq + Copy>(ui: &mut egui::Ui, value: &mut T, selected: T, label: &str) {
         ui.horizontal(|ui| {
@@ -224,157 +164,6 @@ impl EquipmentApp {
             let label_resp = ui.add(egui::Label::new(label).sense(egui::Sense::click()));
             if label_resp.clicked() { *value = selected; }
         });
-    }
-
-    // Parse and execute palette command; return true if the palette should close
-    fn run_palette_command(&mut self, cmd: &str) -> bool {
-        let original = cmd.trim();
-        if original.is_empty() { return false; }
-        let lower = Self::norm(original);
-        let tokens: Vec<&str> = lower.split_whitespace().collect();
-
-        // Help
-        if Self::has_token_like(&tokens, &["hjálp", "help", "?"], 1) {
-            self.message = "Dæmi: 'sækja 12', 'eyða 12', 'skrá HA-101', 'uppfæra 12 í HA-101', 'leita stóll', 'raða tegund', 'opna lista'".into();
-            return true;
-        }
-
-        // Navigation (accept diacritics-agnostic via norm)
-        if lower.starts_with("fara i ") || Self::has_token_like(&tokens, &["skrá", "skra", "breyta", "leita", "prenta", "register", "edit", "search", "print"], 1) {
-            let dest_s = lower.replace("fara i", "");
-            let dest = dest_s.trim();
-            if dest.contains("skra") || dest.contains("register") { self.current_section = AppSection::Register; return true; }
-            if dest.contains("breyta") || dest.contains("edit") { self.current_section = AppSection::Edit; return true; }
-            if dest.contains("leita") || dest.contains("search") { self.current_section = AppSection::Search; return true; }
-            if dest.contains("prenta") || dest.contains("print") { self.current_section = AppSection::Print; return true; }
-        }
-
-        // Sidebar and stats toggles
-        if Self::has_token_like(&tokens, &["opna", "sýna", "show"], 1) && Self::has_token_like(&tokens, &["lista", "listann", "list", "sidebar"], 1) { self.show_sidebar = true; return true; }
-        if Self::has_token_like(&tokens, &["fela", "felja", "hide", "loka"], 1) && Self::has_token_like(&tokens, &["lista", "listann", "list", "sidebar"], 1) { self.show_sidebar = false; return true; }
-        if Self::has_token_like(&tokens, &["sýna", "show"], 1) && Self::has_token_like(&tokens, &["tölfræði", "tolfraedi", "stats"], 2) { self.show_stats = true; return true; }
-        if Self::has_token_like(&tokens, &["fela", "hide"], 1) && Self::has_token_like(&tokens, &["tölfræði", "tolfraedi", "stats"], 2) { self.show_stats = false; return true; }
-
-        // Print/PDF and JSON
-        if Self::has_token_like(&tokens, &["prenta", "prent", "print"], 1) { self.print_current_list(); return true; }
-        if Self::has_token_like(&tokens, &["pdf", "export"], 1) { self.export_current_list_pdf(); return true; }
-        if Self::has_token_like(&tokens, &["vista", "save", "export"], 1) && Self::has_token_like(&tokens, &["json"], 0) { self.save_to_json(); return true; }
-        if Self::has_token_like(&tokens, &["hlaða", "hlada", "load", "import"], 2) && Self::has_token_like(&tokens, &["json"], 0) { self.load_from_json(); return true; }
-
-        // Sorting
-        if Self::has_token_like(&tokens, &["raða", "rada", "sort"], 1) {
-            let mut col: Option<SortColumn> = None;
-            if Self::has_token_like(&tokens, &["id", "auðkenni", "aukenni"], 2) { col = Some(SortColumn::Id); }
-            else if Self::has_token_like(&tokens, &["tegund", "type"], 1) { col = Some(SortColumn::Type); }
-            else if Self::has_token_like(&tokens, &["staðsetning", "stadsetning", "location"], 2) { col = Some(SortColumn::Location); }
-            else if Self::has_token_like(&tokens, &["verðmæti", "verdmæti", "verdmaeti", "value", "price"], 3) { col = Some(SortColumn::Value); }
-            let mut ord = self.sort_order;
-            if Self::has_token_like(&tokens, &["hækkandi", "haekkandi", "asc", "upp"], 2) { ord = SortOrder::Ascending; }
-            if Self::has_token_like(&tokens, &["lækkandi", "laekkandi", "desc", "niður", "nidur"], 2) { ord = SortOrder::Descending; }
-            if Self::has_token_like(&tokens, &["endurstilla", "reset"], 1) { self.sort_column = None; return true; }
-            if let Some(c) = col { self.sort_column = Some(c); self.sort_order = ord; return true; }
-        }
-
-        // Fetch/Open/Edit by id
-        if Self::has_token_like(&tokens, &["sækja", "saekja", "opna", "open", "edit", "breyta", "fa", "fetch"], 2) {
-            if let Some(id) = Self::find_number(&tokens) {
-                self.edit_id = id.to_string();
-                self.fetch_equipment_for_edit();
-                self.current_section = AppSection::Edit;
-                return true;
-            }
-        }
-
-        // Delete by id
-        if Self::has_token_like(&tokens, &["eyða", "eyda", "delete", "remove", "rm"], 2) {
-            if let Some(id) = Self::find_number(&tokens) {
-                self.edit_id = id.to_string();
-                self.fetch_equipment_for_edit();
-                self.delete_equipment();
-                return true;
-            }
-        }
-
-        // Update location by id
-        if Self::has_token_like(&tokens, &["uppfæra", "uppfaera", "update", "setja", "move"], 2) {
-            if let Some(id) = Self::find_number(&tokens) {
-                if let Some(code) = Self::find_location_code(&tokens) {
-                    if let Ok(loc) = Location::try_from(code.as_str()) {
-                        self.current_section = AppSection::Edit;
-                        self.edit_id = id.to_string();
-                        self.fetch_equipment_for_edit();
-                        self.edit_building = loc.building;
-                        self.edit_floor = loc.floor;
-                        self.edit_room = loc.room;
-                        self.update_location();
-                        return true;
-                    }
-                }
-            }
-        }
-
-        // Prefill register location
-        if Self::has_token_like(&tokens, &["skrá", "skra", "register", "new", "ny"], 1) {
-            if let Some(code) = Self::find_location_code(&tokens) {
-                if let Ok(loc) = Location::try_from(code.as_str()) {
-                    self.current_section = AppSection::Register;
-                    self.reg_building = loc.building;
-                    self.reg_floor = loc.floor;
-                    self.reg_room = loc.room;
-                    return true;
-                }
-            }
-        }
-
-        // Search (explicit or fallback)
-        if Self::has_token_like(&tokens, &["leita", "leit", "search", "finna", "find"], 2) || !original.contains(' ') {
-            let q = original.replace(|c: char| c == '"' || c == '\'', "").trim().to_string();
-            if !q.is_empty() {
-                self.search_query = q;
-                self.perform_search();
-                self.current_section = AppSection::Search;
-                return true;
-            }
-        }
-
-        // Last resort: treat as search
-        self.search_query = original.to_string();
-        self.perform_search();
-        self.current_section = AppSection::Search;
-        true
-    }
-
-    // Subtle animated button wrapper: adds hover cursor and a gentle overlay
-    fn button_animated(
-        ui: &mut egui::Ui,
-        text: impl Into<egui::WidgetText>,
-    ) -> egui::Response {
-        let rounding = ui.style().visuals.widgets.inactive.rounding;
-        let tint = egui::Color32::from_white_alpha(12);
-        let resp = ui.add(egui::Button::new(text));
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            let rect = resp.rect;
-            ui.painter().rect_filled(rect, rounding, tint);
-        }
-        resp
-    }
-
-    // Clickable cell with hover highlight; sized to fit table cells
-    fn clickable_cell(
-        ui: &mut egui::Ui,
-        text: impl Into<egui::WidgetText>,
-        size: [f32; 2],
-    ) -> egui::Response {
-        let rounding = ui.style().visuals.widgets.inactive.rounding;
-        let tint = egui::Color32::from_white_alpha(18);
-        let resp = ui.add_sized(size, egui::Label::new(text).sense(egui::Sense::click()));
-        if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            let rect = resp.rect;
-            ui.painter().rect_filled(rect, rounding, tint);
-        }
-        resp
     }
     fn new() -> Self {
         let db = Database::new("equipment.db").expect("Failed to create database");
@@ -417,11 +206,6 @@ impl EquipmentApp {
             error_message: String::new(),
             show_stats: false,
             show_sidebar: false,
-            show_palette: false,
-            palette_query: String::new(),
-            palette_focus_on_open: false,
-            palette_selected_index: None,
-            _stats_anim_seen: false,
         };
         // Run initial search so users don't need to click "Sækja" or type to see data
         this.perform_search();
@@ -611,7 +395,7 @@ impl EquipmentApp {
                 // Start debounce timer on every change
                 self.edit_id_changed_at = Some(std::time::Instant::now());
             }
-            if Self::button_animated(ui, "🔍 Sækja").clicked() {
+            if ui.button("🔍 Sækja").clicked() {
                 self.fetch_equipment_for_edit();
                 // Clear debounce state after explicit fetch
                 self.edit_id_changed_at = None;
@@ -689,7 +473,8 @@ impl EquipmentApp {
             );
             
             ui.add_space(15.0);
-            if Self::button_animated(ui, "✅ Uppfæra staðsetningu").clicked() {
+            
+            if ui.button("✅ Uppfæra staðsetningu").clicked() {
                 self.update_location();
             }
             
@@ -704,7 +489,7 @@ impl EquipmentApp {
             ui.label("⚠ Varúð: Þessi aðgerð er óafturkræf!");
             ui.add_space(10.0);
             
-            if Self::button_animated(ui, "❌ Eyða búnaði").clicked() {
+            if ui.button("❌ Eyða búnaði").clicked() {
                 self.delete_equipment();
             }
         } else if !self.edit_id.is_empty() {
@@ -902,11 +687,11 @@ impl EquipmentApp {
                             let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
                             body.row(row_h, |mut row| {
                                 let mut clicked_any = false;
-                                row.col(|ui| { if Self::clickable_cell(ui, id.to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, equipment.get_type_name().to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, location_str.clone(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, format!("{} kr.", value), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, format!("{}", equipment), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
 
                                 if clicked_any {
                                     self.search_selected_index = Some(i);
@@ -1075,17 +860,17 @@ impl EquipmentApp {
         // Align JSON and print/PDF controls on one row; remove manual "Birta" (auto-refresh is on)
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if Self::button_animated(ui, "💾 Vista í JSON").clicked() {
+            if ui.button("💾 Vista í JSON").clicked() {
                 self.save_to_json();
             }
-            if Self::button_animated(ui, "📂 Hlaða úr JSON").clicked() {
+            if ui.button("📂 Hlaða úr JSON").clicked() {
                 self.load_from_json();
             }
             ui.add_space(12.0);
-            if Self::button_animated(ui, "📄 Prenta lista").clicked() {
+            if ui.button("📄 Prenta lista").clicked() {
                 self.print_current_list();
             }
-            if Self::button_animated(ui, "💾 Flytja út í PDF").clicked() {
+            if ui.button("💾 Flytja út í PDF").clicked() {
                 self.export_current_list_pdf();
             }
         });
@@ -1135,11 +920,11 @@ impl EquipmentApp {
                             let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
                             body.row(row_h, |mut row| {
                                 let mut clicked_any = false;
-                                row.col(|ui| { if Self::clickable_cell(ui, id.to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, equipment.get_type_name(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, location_str.clone(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, format!("{} kr.", value), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                row.col(|ui| { if Self::clickable_cell(ui, format!("{}", equipment), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
 
                                 if clicked_any {
                                     // From Prenta: go to Edit with back button to printing
@@ -1617,7 +1402,7 @@ impl eframe::App for EquipmentApp {
         
         ctx.set_style(style);
 
-    // Modern header with better margins and sidebar toggle
+        // Modern header with better margins and sidebar toggle
         egui::TopBottomPanel::top("app_header")
             .frame(
                 egui::Frame::default()
@@ -1634,7 +1419,12 @@ impl eframe::App for EquipmentApp {
                     ui.heading(egui::RichText::new("Búnaðarlisti Tækniskólans").color(egui::Color32::WHITE).size(24.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let arrow = "↔"; // U+2194 (no FE0F)
-                        if Self::button_animated(ui, egui::RichText::new(if self.show_sidebar { format!("{arrow} Fela lista") } else { "📋 Sjá lista".into() }).color(egui::Color32::WHITE)).clicked() {
+                        let btn = egui::Button::new(
+                            egui::RichText::new(if self.show_sidebar { format!("{arrow} Fela lista") } else { "📋 Sjá lista".into() })
+                                .color(egui::Color32::WHITE),
+                        );
+                        //let btn = egui::Button::new(egui::RichText::new(if self.show_sidebar { "↔︎ Fela lista" } else { "📋 Sjá lista" }).color(egui::Color32::WHITE));
+                        if ui.add(btn).clicked() { 
                             self.show_sidebar = !self.show_sidebar; 
                             // Refresh sidebar data when opening
                             if self.show_sidebar {
@@ -1642,13 +1432,6 @@ impl eframe::App for EquipmentApp {
                                 self.load_equipment();
                             }
                         }
-                        ui.add_space(8.0);
-                        if Self::button_animated(ui, egui::RichText::new("⌘K Skipunir").color(egui::Color32::WHITE)).clicked() {
-                            self.show_palette = true;
-                            self.palette_query.clear();
-                            self.palette_focus_on_open = true;
-                        }
-                        // Tutorial button removed
                     });
                 });
             });
@@ -1665,120 +1448,6 @@ impl eframe::App for EquipmentApp {
                     self.app_icon_tex = Some(tex);
                 }
             }
-        }
-
-        // Keyboard: Command Palette toggle (Cmd+K)
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::K)) {
-            self.show_palette = !self.show_palette;
-            self.palette_query.clear();
-            if self.show_palette { self.palette_focus_on_open = true; }
-        }
-
-        // Keyboard: Esc closes palette when open
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.show_palette { self.show_palette = false; }
-        }
-
-        if self.show_palette {
-            egui::Window::new("Valmynd")
-                .collapsible(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .resizable(false)
-                .show(ctx, |ui| {
-                    ui.set_min_width(420.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Valmynd").strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if Self::button_animated(ui, "❌").clicked() { self.show_palette = false; }
-                        });
-                    });
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut self.palette_query)
-                            .hint_text("t.d. \"eyða 23\", \"skrá HA-123\", \"leita stóll\"")
-                    );
-                    if self.palette_focus_on_open { resp.request_focus(); self.palette_focus_on_open = false; }
-                    ui.add_space(6.0);
-                    // Suggestions with fuzzy ranking
-                    let q = self.palette_query.trim().to_lowercase();
-                    let base: [(&str, &str); 15] = [
-                        ("Fara í Skrá", "fara í skrá"),
-                        ("Fara í Breyta", "fara í breyta"),
-                        ("Fara í Leita", "fara í leita"),
-                        ("Fara í Prenta", "fara í prenta"),
-                        ("Sækja ID", "sækja 123"),
-                        ("Eyða ID", "eyða 123"),
-                        ("Skrá staðsetningu", "skrá HA-101"),
-                        ("Uppfæra staðsetningu ID", "uppfæra 123 í HA-101"),
-                        ("Leita", "leita stóll"),
-                        ("Prenta", "prenta"),
-                        ("Flytja út PDF", "pdf"),
-                        ("Vista JSON", "vista json"),
-                        ("Hlaða JSON", "hlaða json"),
-                        ("Opna lista (hægri)", "opna lista"),
-                        ("Fela lista (hægri)", "fela lista"),
-                    ];
-                    let mut items: Vec<(String, String, usize)> = base.iter().map(|(l,c)| {
-                        let label = l.to_string();
-                        let cmd = c.to_string();
-                        let key = format!("{} {}", label.to_lowercase(), cmd.to_lowercase());
-                        let score = if q.is_empty() { 0 } else { Self::levenshtein(&q, &key) };
-                        (label, cmd, score)
-                    }).collect();
-                    items.sort_by_key(|(_,_,s)| *s);
-                    // Keep only decent matches if user typed something (distance threshold)
-                    if !q.is_empty() {
-                        items.retain(|(l,c,s)| {
-                            let min_len = q.len().min(l.len().min(c.len()));
-                            *s <= (min_len / 2).max(1)
-                                || l.to_lowercase().contains(&q)
-                                || c.to_lowercase().contains(&q)
-                        });
-                    }
-                    // Selection with keys: Tab/Shift+Tab or arrows
-                    let total = items.len();
-                    if total > 0 {
-                        // Initialize selection
-                        if self.palette_selected_index.is_none() { self.palette_selected_index = Some(0); }
-                        let mut idx = self.palette_selected_index.unwrap_or(0).min(total - 1);
-                        let next = |i: usize, t: usize| if i + 1 >= t { 0 } else { i + 1 };
-                        let prev = |i: usize, t: usize| if i == 0 { t - 1 } else { i - 1 };
-                        let (tab, shift) = ui.input(|i| (i.key_pressed(egui::Key::Tab), i.modifiers.shift));
-                        if tab {
-                            idx = if shift { prev(idx, total) } else { next(idx, total) };
-                        }
-                        let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
-                        if down { idx = next(idx, total); }
-                        if up { idx = prev(idx, total); }
-                        self.palette_selected_index = Some(idx);
-
-                        // Enter: run highlighted suggestion if present; otherwise run raw query
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            if let Some((_, cmd, _)) = items.get(idx).cloned() {
-                                if self.run_palette_command(cmd.as_str()) { self.show_palette = false; }
-                            } else {
-                                let cmd = self.palette_query.clone();
-                                if self.run_palette_command(cmd.trim()) { self.show_palette = false; }
-                            }
-                        }
-
-                        // Render suggestions with highlight
-                        for (i, (label, cmd, _score)) in items.iter().enumerate() {
-                            let is_sel = Some(i) == self.palette_selected_index;
-                            let text = if is_sel { format!("▶ {}", label) } else { label.clone() };
-                            let clicked = Self::button_animated(ui, text).clicked();
-                            if clicked {
-                                if self.run_palette_command(cmd) { self.show_palette = false; }
-                            }
-                        }
-                    } else {
-                        // No items: allow Enter to run raw command for power users
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            let cmd = self.palette_query.clone();
-                            if self.run_palette_command(cmd.trim()) { self.show_palette = false; }
-                        }
-                        ui.label(egui::RichText::new("Engar tillögur").italics());
-                    }
-                });
         }
 
         // Right sidebar with full equipment list (auto-refreshes)
@@ -1864,12 +1533,12 @@ impl eframe::App for EquipmentApp {
                                     let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
                                     body.row(row_h, |mut row| {
                                         let mut clicked_any = false;
-                                        row.col(|ui| { if Self::clickable_cell(ui, id.to_string(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                        row.col(|ui| { if Self::clickable_cell(ui, equipment.get_type_name(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                        row.col(|ui| { if Self::clickable_cell(ui, location_str.clone(), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
-                                        row.col(|ui| { if Self::clickable_cell(ui, format!("{} kr.", value), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(id.to_string()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(equipment.get_type_name()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(location_str.clone()).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
+                                        row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{} kr.", value)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
                                         if show_description {
-                                            row.col(|ui| { if Self::clickable_cell(ui, format!("{}", equipment), [ui.available_width(), row_h]).clicked() { clicked_any = true; } });
+                                            row.col(|ui| { if ui.add_sized([ui.available_width(), row_h], egui::Label::new(format!("{}", equipment)).sense(egui::Sense::click())).clicked() { clicked_any = true; } });
                                         }
 
                                         if clicked_any {
@@ -1956,6 +1625,7 @@ impl eframe::App for EquipmentApp {
                 });
                 ui.add_space(5.0);
             }
+            
             ui.add_space(10.0);
             
             // Content
@@ -1967,8 +1637,18 @@ impl eframe::App for EquipmentApp {
             }
         });
 
-    // Tutorial overlay removed
-
-}
-
+        // Persistent footer with author and year, improved contrast and margins
+        egui::TopBottomPanel::bottom("app_footer")
+            .frame(
+                egui::Frame::default()
+                    .fill(egui::Color32::from_rgb(60, 100, 140))
+                    .inner_margin(egui::Margin::symmetric(16.0, 8.0))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(180)))
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Daníel Snær Rodríguez, 2025").color(egui::Color32::WHITE).strong());
+                });
+            });
+    }
 }
