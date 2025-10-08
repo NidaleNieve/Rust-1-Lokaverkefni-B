@@ -20,6 +20,7 @@ use table::Table;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::process::Command;
+use std::time::Duration;
 
 fn main() -> Result<(), eframe::Error> {
     // Build viewport and set app icon if available
@@ -329,12 +330,12 @@ impl EquipmentApp {
         let db = self.db.lock().unwrap();
         match db.insert_equipment(&equipment) {
             Ok(id) => {
-                self.message = format!("✅ Búnaður skráður með ID: {}", id);
+                self.message = format!(" Búnaður skráður með ID: {}", id);
                 self.reg_value.clear();
                 self.reg_projector_lumens.clear();
             }
             Err(e) => {
-                self.error_message = format!("❌ Villa við skráningu: {}", e);
+                self.error_message = format!(" Villa við skráningu: {}", e);
             }
         }
     }
@@ -480,11 +481,11 @@ impl EquipmentApp {
                 self.edit_equipment = Some(equipment);
             }
             Ok(None) => {
-                self.error_message = format!("❌ Búnaður með ID {} fannst ekki", id);
+                self.error_message = format!(" Búnaður með ID {} fannst ekki", id);
                 self.edit_equipment = None;
             }
             Err(e) => {
-                self.error_message = format!("❌ Villa við að sækja búnað: {}", e);
+                self.error_message = format!(" Villa við að sækja búnað: {}", e);
                 self.edit_equipment = None;
             }
         }
@@ -510,13 +511,13 @@ impl EquipmentApp {
         let db = self.db.lock().unwrap();
         match db.update_location(id, &location) {
             Ok(_) => {
-                self.message = format!("✅ Staðsetning uppfærð fyrir búnað með ID: {}", id);
+                self.message = format!(" Staðsetning uppfærð fyrir búnað með ID: {}", id);
                 // Refresh the equipment info
                 drop(db);
                 self.fetch_equipment_for_edit();
             }
             Err(e) => {
-                self.error_message = format!("❌ Villa við uppfærslu: {}", e);
+                self.error_message = format!(" Villa við uppfærslu: {}", e);
             }
         }
     }
@@ -536,12 +537,12 @@ impl EquipmentApp {
         let db = self.db.lock().unwrap();
         match db.delete_equipment(id) {
             Ok(_) => {
-                self.message = format!("✅ Búnaði með ID {} eytt", id);
+                self.message = format!(" Búnaði með ID {} eytt", id);
                 self.edit_id.clear();
                 self.edit_equipment = None;
             }
             Err(e) => {
-                self.error_message = format!("❌ Villa við eyðingu: {}", e);
+                self.error_message = format!(" Villa við eyðingu: {}", e);
             }
         }
     }
@@ -614,8 +615,8 @@ impl EquipmentApp {
             }
 
             egui::ScrollArea::vertical().show(ui, |ui| {
-                // Clone data to avoid borrowing self immutably during row rendering
-                let data = self.displayed_equipment.clone();
+                // Use current sorted search results
+                let table_data = data.clone();
                 use egui_extras::{TableBuilder, Column};
                 let table = TableBuilder::new(ui)
                     .striped(true)
@@ -645,7 +646,7 @@ impl EquipmentApp {
                     })
                     .body(|mut body| {
                         let row_h = 22.0;
-                        for (i, equipment) in data.iter().enumerate() {
+                        for (i, equipment) in table_data.iter().enumerate() {
                             let id = equipment.get_id().unwrap_or(0);
                             let location_str = match equipment { Equipment::Table(t) => format!("{}", t.location), Equipment::Chair(c) => format!("{}", c.location), Equipment::Projector(p) => format!("{}", p.location) };
                             let value = match equipment { Equipment::Table(t) => t.value, Equipment::Chair(c) => c.value, Equipment::Projector(p) => p.value };
@@ -705,7 +706,7 @@ impl EquipmentApp {
                     .collect();
             }
             Err(e) => {
-                self.error_message = format!("❌ Villa við leit: {}", e);
+                self.error_message = format!(" Villa við leit: {}", e);
             }
         }
     }
@@ -966,7 +967,7 @@ impl EquipmentApp {
                 self.message = "📄 Opnaði prentglugga í vafra".into();
             }
             Err(e) => {
-                self.error_message = format!("❌ Gat ekki útbúið prentun: {}", e);
+                self.error_message = format!(" Gat ekki útbúið prentun: {}", e);
             }
         }
     }
@@ -974,31 +975,74 @@ impl EquipmentApp {
     fn export_current_list_pdf(&mut self) {
         self.error_message.clear();
         self.message.clear();
-        // Ask user where to save the PDF
         if let Some(dest) = FileDialog::new().set_file_name("bunadarlisti.pdf").add_filter("PDF", &["pdf"]).save_file() {
-            // Create temp HTML and attempt conversion via wkhtmltopdf if available
-            let html = self.generate_print_html();
-            let mut tmp = std::env::temp_dir();
-            tmp.push("bunadarlisti_export.html");
-            if let Err(e) = std::fs::write(&tmp, html) {
-                self.error_message = format!("❌ Gat ekki undirbúið útflutning: {}", e);
-                return;
+            // Generate a simple PDF with a table listing the current displayed_equipment
+            use printpdf::*;
+            let (doc, page1, layer1) = PdfDocument::new("Búnaðarlisti", Mm(210.0), Mm(297.0), "Layer 1");
+            let mut current_layer = doc.get_page(page1).get_layer(layer1);
+
+            // Basic text config
+            let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
+            let title = "Búnaðarlisti Tækniskólans";
+            let mut y = Mm(280.0);
+            current_layer.use_text(title, 16.0, Mm(14.0), y, &font);
+            y = Mm(y.0 - 8.0);
+            current_layer.use_text(format!("Fjöldi: {} atriði", self.displayed_equipment.len()), 10.0, Mm(14.0), y, &font);
+            y = Mm(y.0 - 10.0);
+
+            // Table headers
+            let headers = ["ID", "Tegund", "Staðsetning", "Verðmæti", "Lýsing"];
+            let col_x = [Mm(14.0), Mm(34.0), Mm(70.0), Mm(110.0), Mm(140.0)];
+            for (i, h) in headers.iter().enumerate() {
+                current_layer.use_text(h.to_string(), 10.0, col_x[i], y, &font);
+            }
+            y = Mm(y.0 - 6.0);
+
+            // Rows (simple flow, wraps to new page if needed)
+            let line_h = 5.5;
+            let mut page = 1;
+            for eq in &self.displayed_equipment {
+                if y.0 < 20.0 {
+                    // new page
+                    page += 1;
+                    let (p, l) = doc.add_page(Mm(210.0), Mm(297.0), format!("Layer {}", page));
+                    current_layer = doc.get_page(p).get_layer(l);
+                    y = Mm(280.0);
+                    // re-draw headers
+                    for (i, h) in headers.iter().enumerate() {
+                        current_layer.use_text(h.to_string(), 10.0, col_x[i], y, &font);
+                    }
+                    y = Mm(y.0 - 6.0);
+                }
+
+                let id = eq.get_id().unwrap_or(0).to_string();
+                let typ = eq.get_type_name().to_string();
+                let (location_str, value, desc) = match eq {
+                    Equipment::Table(t) => (format!("{}", t.location), t.value, format!("{}", eq)),
+                    Equipment::Chair(c) => (format!("{}", c.location), c.value, format!("{}", eq)),
+                    Equipment::Projector(p) => (format!("{}", p.location), p.value, format!("{}", eq)),
+                };
+
+                // Draw row text
+                current_layer.use_text(id, 9.0, col_x[0], y, &font);
+                current_layer.use_text(typ, 9.0, col_x[1], y, &font);
+                current_layer.use_text(location_str, 9.0, col_x[2], y, &font);
+                current_layer.use_text(format!("{} kr.", value), 9.0, col_x[3], y, &font);
+                current_layer.use_text(desc, 9.0, col_x[4], y, &font);
+
+                y = Mm(y.0 - line_h);
             }
 
-            // Try using wkhtmltopdf if installed
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(format!("command -v wkhtmltopdf >/dev/null 2>&1 && wkhtmltopdf '{}' '{}'", tmp.display(), dest.display()))
-                .status();
-
-            match status {
-                Ok(s) if s.success() => {
-                    self.message = format!("✅ Vistað PDF í {}", dest.display());
+            match std::fs::File::create(&dest) {
+                Ok(file) => {
+                    let mut buf = std::io::BufWriter::new(file);
+                    match doc.save(&mut buf) {
+                        Ok(_) => self.message = format!("✅ Vistað PDF í {}", dest.display()),
+                        Err(e) => self.error_message = format!(" Gat ekki vistað PDF: {}", e),
+                    }
                 }
-                _ => {
-                    // Fallback: open HTML and ask user to Save as PDF from print dialog
-                    let _ = Command::new("open").arg(&tmp).spawn();
-                    self.error_message = "⚠️ Gat ekki umbreytt í PDF sjálfvirkt (vantar 'wkhtmltopdf'). Opnaði skrá í vafra — veldu File → Print → Save as PDF.".into();
+                Err(e) => {
+                    self.error_message = format!(" Gat ekki búið til skrá: {}", e);
                 }
             }
         }
@@ -1217,7 +1261,7 @@ impl EquipmentApp {
                 self.display_output = output;
             }
             Err(e) => {
-                self.error_message = format!("❌ Villa við birtingu: {}", e);
+                self.error_message = format!(" Villa við birtingu: {}", e);
             }
         }
     }
@@ -1233,11 +1277,11 @@ impl EquipmentApp {
             Ok(equipment) => {
                 let json = serde_json::to_string_pretty(&equipment).unwrap();
                 match std::fs::write(&path, json) {
-                    Ok(_) => { self.message = format!("✅ Gögn vistuð í {}", path.display()); }
-                    Err(e) => { self.error_message = format!("❌ Villa við vistun: {}", e); }
+                    Ok(_) => { self.message = format!(" Gögn vistuð í {}", path.display()); }
+                    Err(e) => { self.error_message = format!(" Villa við vistun: {}", e); }
                 }
             }
-            Err(e) => { self.error_message = format!("❌ Villa við lestur úr gagnagrunni: {}", e); }
+            Err(e) => { self.error_message = format!(" Villa við lestur úr gagnagrunni: {}", e); }
         }
     }
     
@@ -1256,7 +1300,7 @@ impl EquipmentApp {
                     {
                         let db = self.db.lock().unwrap();
                         if let Err(e) = db.clear_all_equipment() {
-                            self.error_message = format!("❌ Tókst ekki að tæma gagnagrunn: {}", e);
+                            self.error_message = format!(" Tókst ekki að tæma gagnagrunn: {}", e);
                             return;
                         }
                         for eq in equipment.drain(..) {
@@ -1276,17 +1320,19 @@ impl EquipmentApp {
                     self.search_results.clear();
                     self.sort_column = None; // default
                     self.load_equipment();
-                    self.message = format!("✅ {} búnaður hlaðinn úr {}", inserted, path.display());
+                    self.message = format!(" {} búnaður hlaðinn úr {}", inserted, path.display());
                 }
-                Err(e) => { self.error_message = format!("❌ Villa við að lesa JSON: {}", e); }
+                Err(e) => { self.error_message = format!(" Villa við að lesa JSON: {}", e); }
             },
-            Err(e) => { self.error_message = format!("❌ Villa við að opna skrá: {}", e); }
+            Err(e) => { self.error_message = format!(" Villa við að opna skrá: {}", e); }
         }
     }
 }
 
 impl eframe::App for EquipmentApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    // Refresh UI frequently so lists stay snappy
+    ctx.request_repaint_after(Duration::from_millis(50));
         // Modern light blue color scheme
         let mut style = (*ctx.style()).clone();
         
@@ -1540,14 +1586,14 @@ impl eframe::App for EquipmentApp {
             // Messages with better visibility
             if !self.message.is_empty() {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("✓").color(egui::Color32::from_rgb(46, 125, 50)).size(20.0));
+                    ui.label(egui::RichText::new("✅").color(egui::Color32::from_rgb(46, 125, 50)).size(20.0));
                     ui.label(egui::RichText::new(&self.message).color(egui::Color32::from_rgb(46, 125, 50)).strong());
                 });
                 ui.add_space(5.0);
             }
             if !self.error_message.is_empty() {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("✗").color(egui::Color32::from_rgb(211, 47, 47)).size(20.0));
+                    ui.label(egui::RichText::new("❌").color(egui::Color32::from_rgb(211, 47, 47)).size(20.0));
                     ui.label(egui::RichText::new(&self.error_message).color(egui::Color32::from_rgb(211, 47, 47)).strong());
                 });
                 ui.add_space(5.0);

@@ -12,6 +12,7 @@ regex = "1.10"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 rfd = "0.14"
 egui_extras = "0.28"
+printpdf = "0.7"
 
 [target.'cfg(windows)'.build-dependencies]
 winres = "0.1"
