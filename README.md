@@ -30,6 +30,33 @@
 - 🎨 **Falleg sýn**: Vel sniðin úttak með fulltum lýsingum
 - 📱 **Notendavænt viðmót**: Dropdown valmyndir og sleðar fyrir staðsetningar
 
+
+## Hvernig á að keyra forritið
+
+### Forsendur
+
+Gakktu úr skugga um að þú hafir Rust uppsett. Ef ekki, sæktu það á [https://rustup.rs/](https://rustup.rs/)
+
+### Keyra forritið
+
+1. Sóttu verkefnið með því að ýta á græna "Code" takkan og svo "Download Zip"
+
+2. Opnaðu möppuna og inni í henni opnaðu terminal/command prompt
+
+2. keyrðu þessa skipun:
+```bash
+cargo run
+```
+### Byggja forritið
+
+Til að byggja executable:
+```bash
+cargo build --release
+```
+
+Executable mun vera í `target/release/CLAUDE-Lokaverkefni-B`
+
+
 ## Tækniupplýsingar
 
 ### Verkefnaskipulag
@@ -54,32 +81,6 @@ src/
 - **rusqlite** (0.32): SQLite gagnagrunnur
 - **serde** + **serde_json** (1.0): JSON serialization
 - **regex** (1.10): Staðfesting á staðsetningarsniði
-
-## Hvernig á að keyra forritið
-
-### Forsendur
-
-Gakktu úr skugga um að þú hafir Rust uppsett. Ef ekki, sæktu það á [https://rustup.rs/](https://rustup.rs/)
-
-### Keyra forritið
-
-1. Sóttu verkefnið með því að ýta á græna "Code" takkan og svo "Download Zip"
-
-2. Opnaðu möppuna og inni í henni opnaðu terminal/command prompt
-
-2. keyrðu þessa skipun:
-```bash
-cargo run
-```
-
-### Byggja forritið
-
-Til að byggja executable:
-```bash
-cargo build --release
-```
-
-Executable mun vera í `target/release/CLAUDE-Lokaverkefni-B`
 
 ## Notkun
 
@@ -192,8 +193,6 @@ Gögn eru vistuð í `equipment.db` SQLite gagnagrunn sem er sjálfkrafa búinn 
 
 ## Höfundur
 
+Daníel Snær Rodríguez.
+
 Verkefni unnið fyrir Tækniskólann í Rust forritunarverkefni.
-
-## Leyfi
-
-Þetta verkefni er fyrir námsnotkun.
