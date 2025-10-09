@@ -27,6 +27,8 @@ Forritið býr til gagnagrunn ef ekki er til, keyrir flutningsskrár (`migration
 - **Síur** efst: eftir húsi og/eða tegund.
 - **JSON inn/út**: Flytja út/inn gagnaafrit (id eru endurskilgreind við innflutning).
 
+## Myndband fyrir skil
+
 ## Hönnun / Uppbygging
 
 ```
@@ -71,12 +73,6 @@ cargo test
 3. **Bjóða `gestskoli` inn**: *Settings → Collaborators → Add people → `gestskoli`* og velja **Write** aðgang.
 4. **Skila slóð á Innu** í skilahólfið „Lokaverkefni B“.
 
-## Skil (Hverju á að skila)
-- Allur kóði í **GitHub** (private).
-- Þessi `README` og leiðbeiningar til keyrslu.
-- **AI‑skjöl**: sjá `AI_USAGE.md` og `ai/commands.md` (með dæmum).
-- **Myndband**: sýnið helstu virkni (síun, skráningu, eyðingu, uppfærslu og JSON inn/út). Mælt er með OBS eða skjáupptöku í stýrikerfi.
-
 ## Öryggi
 - Engin leyndarmál í repo – notið `.env` (sjá `.env.example`).
 - SQL injection: `rusqlite` `params![]` er notað fyrir bindingu.
@@ -86,9 +82,6 @@ cargo test
 - `eframe`/`egui` – opinbert GUI (sjá docs.rs)  
 - `rusqlite` – SQLite fyrir Rust (sjá docs.rs)  
 - `rfd` – skráavalgluggar fyrir egui
-
-## Leyfi
-MIT.
 
 ### Leitar-/birtingaraðgerðir
 - Birta **alla**.
