@@ -31,7 +31,7 @@ cargo build --release
 Executable mun vera í `target/release/Búnaðarkerfi`
 
 ## Myndband fyrir skil
-#### Hægt er að ![finna það hér](myndband.mp4)
+#### Hægt er að ![finna það hér](myndband.mov)
 <br>
 
 ## Gervigreindaskipanir
